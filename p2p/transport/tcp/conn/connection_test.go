@@ -28,8 +28,8 @@ func createMConnectionWithSingleStream(t *testing.T, conn net.Conn) (*MConnectio
 	cfg := DefaultMConnConfig()
 	cfg.PingInterval = 90 * time.Millisecond
 	cfg.PongTimeout = 45 * time.Millisecond
-	chDescs := []*ChannelDescriptor{{ID: testStreamID, Priority: 1, SendQueueCapacity: 1}}
-	c := NewMConnectionWithConfig(conn, chDescs, cfg)
+	cfg.ChannelDescs = []ChannelDescriptor{{ID: testStreamID, Priority: 1, SendQueueCapacity: 1}}
+	c := NewMConnection(conn, cfg)
 	c.SetLogger(log.TestingLogger())
 
 	stream, err := c.OpenStream(testStreamID)
@@ -355,14 +355,14 @@ func newClientAndServerConnsForReadErrors(t *testing.T) (*MConnection, *MConnect
 	server, client := NetPipe()
 
 	// create client conn with two channels
-	chDescs := []*ChannelDescriptor{
-		{ID: testStreamID, Priority: 1, SendQueueCapacity: 1},
-		{ID: 0x02, Priority: 1, SendQueueCapacity: 1},
-	}
 	cfg := DefaultMConnConfig()
 	cfg.PingInterval = 90 * time.Millisecond
 	cfg.PongTimeout = 45 * time.Millisecond
-	mconnClient := NewMConnectionWithConfig(client, chDescs, cfg)
+	cfg.ChannelDescs = []ChannelDescriptor{
+		{ID: testStreamID, Priority: 1, SendQueueCapacity: 1},
+		{ID: 0x02, Priority: 1, SendQueueCapacity: 1},
+	}
+	mconnClient := NewMConnection(client, cfg)
 	clientStream, err := mconnClient.OpenStream(testStreamID)
 	require.NoError(t, err)
 	mconnClient.SetLogger(log.TestingLogger().With("module", "client"))
@@ -388,8 +388,9 @@ func assertBytes(t *testing.T, s *MConnectionStream, want []byte) {
 	buf := make([]byte, len(want))
 	n, err := s.Read(buf)
 	require.NoError(t, err)
-	assert.Equal(t, len(want), n)
-	assert.Equal(t, want, buf)
+	if assert.Equal(t, len(want), n) {
+		assert.Equal(t, want, buf)
+	}
 }
 
 func gotError(ch <-chan error) bool {
@@ -510,7 +511,7 @@ func TestMConnection_ChannelOverflow(t *testing.T) {
 
 	// send msg that's just right
 	packet := tmp2p.PacketMsg{
-		ChannelID: 0x01,
+		ChannelID: testStreamID,
 		EOF:       true,
 		Data:      []byte(`42`),
 	}

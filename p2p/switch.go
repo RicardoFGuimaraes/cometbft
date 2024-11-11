@@ -15,7 +15,6 @@ import (
 	ni "github.com/cometbft/cometbft/p2p/nodeinfo"
 	"github.com/cometbft/cometbft/p2p/nodekey"
 	"github.com/cometbft/cometbft/p2p/transport/tcp"
-	"github.com/cometbft/cometbft/p2p/transport/tcp/conn"
 )
 
 const (
@@ -37,19 +36,6 @@ const (
 
 	handshakeStreamID = 0x00
 )
-
-// MConnConfig returns an MConnConfig with fields updated
-// from the P2PConfig.
-func MConnConfig(cfg *config.P2PConfig) conn.MConnConfig {
-	mConfig := conn.DefaultMConnConfig()
-	mConfig.FlushThrottle = cfg.FlushThrottleTimeout
-	mConfig.SendRate = cfg.SendRate
-	mConfig.RecvRate = cfg.RecvRate
-	mConfig.MaxPacketMsgPayloadSize = cfg.MaxPacketMsgPayloadSize
-	mConfig.TestFuzz = cfg.TestFuzz
-	mConfig.TestFuzzConfig = cfg.TestFuzzConfig
-	return mConfig
-}
 
 // -----------------------------------------------------------------------------
 
@@ -176,6 +162,13 @@ func (sw *Switch) AddReactor(name string, reactor Reactor) Reactor {
 		sw.streamInfoByStreamID[streamID] = streamInfo{reactor: reactor, msgType: streamDesc.MessageType()}
 	}
 
+	// Update the transport with the new stream descriptors.
+	descs := make([]abstract.StreamDescriptor, 0)
+	for _, info := range sw.streamInfoByStreamID {
+		descs = append(descs, info.reactor.StreamDescriptors()...)
+	}
+	sw.transport.UpdateStreamDescriptors(descs)
+
 	sw.reactors[name] = reactor
 	reactor.SetSwitch(sw)
 	return reactor
@@ -187,6 +180,14 @@ func (sw *Switch) RemoveReactor(name string, reactor Reactor) {
 	for _, streamDesc := range reactor.StreamDescriptors() {
 		delete(sw.streamInfoByStreamID, streamDesc.StreamID())
 	}
+
+	// Update the transport with the new stream descriptors.
+	descs := make([]abstract.StreamDescriptor, 0)
+	for _, info := range sw.streamInfoByStreamID {
+		descs = append(descs, info.reactor.StreamDescriptors()...)
+	}
+	sw.transport.UpdateStreamDescriptors(descs)
+
 	delete(sw.reactors, name)
 	reactor.SetSwitch(nil)
 }

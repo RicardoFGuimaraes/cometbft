@@ -99,7 +99,7 @@ func createOutboundPeerAndPerformHandshake(
 
 	// create peer
 	var (
-		streamDescs = []StreamDescriptor{
+		streamDescs = []abstract.StreamDescriptor{
 			&tcpconn.ChannelDescriptor{
 				ID:           testCh,
 				Priority:     1,

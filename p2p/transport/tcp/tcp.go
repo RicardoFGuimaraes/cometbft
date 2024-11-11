@@ -119,7 +119,7 @@ type MultiplexTransport struct {
 	// TODO(xla): This config is still needed as we parameterise peerConn and
 	// peer currently. All relevant configuration should be refactored into options
 	// with sane defaults.
-	mConfig conn.MConnConfig
+	mConfig *conn.MConnConfig
 }
 
 // Test multiplexTransport for interface completeness.
@@ -129,17 +129,14 @@ var (
 )
 
 // NewMultiplexTransport returns a tcp connected multiplexed peer.
-func NewMultiplexTransport(
-	nodeKey nodekey.NodeKey,
-	mConfig conn.MConnConfig,
-) *MultiplexTransport {
+func NewMultiplexTransport(nodeKey nodekey.NodeKey, mConfig conn.MConnConfig) *MultiplexTransport {
 	return &MultiplexTransport{
 		acceptc:          make(chan accept),
 		closec:           make(chan struct{}),
 		dialTimeout:      defaultDialTimeout,
 		filterTimeout:    defaultFilterTimeout,
 		handshakeTimeout: defaultHandshakeTimeout,
-		mConfig:          mConfig,
+		mConfig:          &mConfig,
 		nodeKey:          nodeKey,
 		conns:            NewConnSet(),
 		resolver:         net.DefaultResolver,
@@ -222,6 +219,18 @@ func (mt *MultiplexTransport) Listen(addr na.NetAddr) error {
 	go mt.acceptPeers()
 
 	return nil
+}
+
+func (mt *MultiplexTransport) UpdateStreamDescriptors(desc []abstract.StreamDescriptor) {
+	chDescs := make([]conn.ChannelDescriptor, len(desc))
+	for i, d := range desc {
+		var ok bool
+		chDescs[i], ok = d.(conn.ChannelDescriptor)
+		if !ok {
+			panic(fmt.Sprintf("unexpected StreamDescriptor type: %T", d))
+		}
+	}
+	mt.mConfig.ChannelDescs = chDescs
 }
 
 func (mt *MultiplexTransport) acceptPeers() {
@@ -382,12 +391,8 @@ func (mt *MultiplexTransport) upgrade(
 		}
 	}
 
-	return conn.NewMConnectionWithConfig(
-		secretConn,
-		// TODO: will this be filled in later?
-		[]*conn.ChannelDescriptor{},
-		conn.MConnConfig{},
-	), remotePubKey, nil
+	// Copy MConnConfig to avoid it being modified by the transport.
+	return conn.NewMConnection(secretConn, *mt.mConfig), remotePubKey, nil
 }
 
 func upgradeSecretConn(

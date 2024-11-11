@@ -135,6 +135,8 @@ type MConnConfig struct {
 	// Fuzz connection
 	TestFuzz       bool                   `mapstructure:"test_fuzz"`
 	TestFuzzConfig *config.FuzzConnConfig `mapstructure:"test_fuzz_config"`
+
+	ChannelDescs []ChannelDescriptor `mapstructure:"stream_descs"`
 }
 
 // DefaultMConnConfig returns the default config.
@@ -150,13 +152,7 @@ func DefaultMConnConfig() MConnConfig {
 }
 
 // NewMConnection wraps net.Conn and creates multiplex connection.
-func NewMConnection(conn net.Conn, chDescs []*ChannelDescriptor) *MConnection {
-	return NewMConnectionWithConfig(conn, chDescs, DefaultMConnConfig())
-}
-
-// NewMConnectionWithConfig wraps net.Conn and creates multiplex connection
-// using the given config.
-func NewMConnectionWithConfig(conn net.Conn, chDescs []*ChannelDescriptor, config MConnConfig) *MConnection {
+func NewMConnection(conn net.Conn, config MConnConfig) *MConnection {
 	if config.PongTimeout >= config.PingInterval {
 		panic("pongTimeout must be less than pingInterval (otherwise, next ping will reset pong timer)")
 	}
@@ -179,10 +175,12 @@ func NewMConnectionWithConfig(conn net.Conn, chDescs []*ChannelDescriptor, confi
 	channelsIdx := map[byte]*Channel{}
 	channels := []*Channel{}
 
-	for _, desc := range chDescs {
-		channel := newChannel(mconn, *desc)
+	for _, desc := range config.ChannelDescs {
+		channel := newChannel(mconn, desc)
 		channelsIdx[channel.desc.ID] = channel
 		channels = append(channels, channel)
+
+		mconn.recvMsgsByStreamID[desc.ID] = make(chan []byte, maxRecvChanCap)
 	}
 	mconn.channels = channels
 	mconn.channelsIdx = channelsIdx
@@ -673,7 +671,8 @@ func (c *MConnection) pushRecvMsg(streamID byte, msgBytes []byte) {
 	// Init.
 	_, ok := c.recvMsgsByStreamID[streamID]
 	if !ok {
-		c.recvMsgsByStreamID[streamID] = make(chan []byte, maxRecvChanCap)
+		c.Logger.Error("Unknown stream", "streamID", streamID)
+		return
 	}
 
 	// Drop the message if the buffer is full.

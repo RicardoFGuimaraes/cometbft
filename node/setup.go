@@ -32,6 +32,7 @@ import (
 	"github.com/cometbft/cometbft/p2p/nodekey"
 	"github.com/cometbft/cometbft/p2p/pex"
 	"github.com/cometbft/cometbft/p2p/transport/tcp"
+	tcpconn "github.com/cometbft/cometbft/p2p/transport/tcp/conn"
 	"github.com/cometbft/cometbft/privval"
 	"github.com/cometbft/cometbft/proxy"
 	sm "github.com/cometbft/cometbft/state"
@@ -417,9 +418,15 @@ func createTransport(
 	*tcp.MultiplexTransport,
 	[]p2p.PeerFilterFunc,
 ) {
+	tcpConfig := tcpconn.DefaultMConnConfig()
+	tcpConfig.FlushThrottle = config.P2P.FlushThrottleTimeout
+	tcpConfig.SendRate = config.P2P.SendRate
+	tcpConfig.RecvRate = config.P2P.RecvRate
+	tcpConfig.MaxPacketMsgPayloadSize = config.P2P.MaxPacketMsgPayloadSize
+	tcpConfig.TestFuzz = config.P2P.TestFuzz
+	tcpConfig.TestFuzzConfig = config.P2P.TestFuzzConfig
 	var (
-		mConnConfig = p2p.MConnConfig(config.P2P)
-		transport   = tcp.NewMultiplexTransport(*nodeKey, mConnConfig)
+		transport   = tcp.NewMultiplexTransport(*nodeKey, tcpConfig)
 		connFilters = []tcp.ConnFilterFunc{}
 		peerFilters = []p2p.PeerFilterFunc{}
 	)

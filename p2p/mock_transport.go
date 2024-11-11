@@ -80,3 +80,5 @@ func (*mockTransport) Dial(addr na.NetAddr) (abstract.Connection, error) {
 func (*mockTransport) Cleanup(abstract.Connection) error {
 	return nil
 }
+
+func (*mockTransport) UpdateStreamDescriptors([]abstract.StreamDescriptor) {}

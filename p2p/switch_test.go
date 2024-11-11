@@ -46,13 +46,13 @@ type TestReactor struct {
 	BaseReactor
 
 	mtx               cmtsync.Mutex
-	streamDescriptors []StreamDescriptor
+	streamDescriptors []abstract.StreamDescriptor
 	logMessages       bool
 	msgsCounter       int
 	msgsReceived      map[byte][]PeerMessage
 }
 
-func NewTestReactor(descs []StreamDescriptor, logMessages bool) *TestReactor {
+func NewTestReactor(descs []abstract.StreamDescriptor, logMessages bool) *TestReactor {
 	tr := &TestReactor{
 		streamDescriptors: descs,
 		logMessages:       logMessages,
@@ -63,7 +63,7 @@ func NewTestReactor(descs []StreamDescriptor, logMessages bool) *TestReactor {
 	return tr
 }
 
-func (tr *TestReactor) StreamDescriptors() []StreamDescriptor {
+func (tr *TestReactor) StreamDescriptors() []abstract.StreamDescriptor {
 	return tr.streamDescriptors
 }
 
@@ -103,7 +103,7 @@ func initSwitchFunc(_ int, sw *Switch) *Switch {
 	})
 
 	// Make two reactors of two channels each
-	sw.AddReactor("foo", NewTestReactor([]StreamDescriptor{
+	sw.AddReactor("foo", NewTestReactor([]abstract.StreamDescriptor{
 		&tcpconn.ChannelDescriptor{
 			ID:           byte(0x00),
 			Priority:     1,
@@ -115,7 +115,7 @@ func initSwitchFunc(_ int, sw *Switch) *Switch {
 			MessageTypeI: &p2pproto.Message{},
 		},
 	}, true))
-	sw.AddReactor("bar", NewTestReactor([]StreamDescriptor{
+	sw.AddReactor("bar", NewTestReactor([]abstract.StreamDescriptor{
 		&tcpconn.ChannelDescriptor{
 			ID:           byte(0x02),
 			Priority:     3,
@@ -765,6 +765,10 @@ func (errorTransport) Dial(na.NetAddr) (abstract.Connection, error) {
 }
 
 func (errorTransport) Cleanup(abstract.Connection) error {
+	panic("not implemented")
+}
+
+func (errorTransport) UpdateStreamDescriptors([]abstract.StreamDescriptor) {
 	panic("not implemented")
 }
 
