@@ -188,7 +188,7 @@ func (mt *MultiplexTransport) Dial(addr na.NetAddr) (abstract.Connection, error)
 		return nil, err
 	}
 
-	return mconn, nil
+	return mconn, mconn.Start()
 }
 
 // Close implements transportLifecycle.
@@ -287,6 +287,7 @@ func (mt *MultiplexTransport) acceptPeers() {
 					addr := c.RemoteAddr()
 					id := nodekey.PubKeyToID(remotePubKey)
 					netAddr = na.New(id, addr)
+					err = mconn.Start()
 				}
 			}
 
