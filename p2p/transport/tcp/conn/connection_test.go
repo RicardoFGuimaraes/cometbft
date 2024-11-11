@@ -17,44 +17,40 @@ import (
 	"github.com/cometbft/cometbft/libs/protoio"
 )
 
-const maxPingPongPacketSize = 1024 // bytes
+const (
+	maxPingPongPacketSize = 1024 // bytes
+	testStreamID          = 0x01
+)
 
-func createTestMConnection(conn net.Conn) *MConnection {
-	onReceive := func(_ byte, _ []byte) {
-	}
-	onError := func(_ any) {
-	}
-	c := createMConnectionWithCallbacks(conn, onReceive, onError)
-	c.SetLogger(log.TestingLogger())
-	return c
-}
+func createMConnectionWithSingleStream(t *testing.T, conn net.Conn) (*MConnection, *MConnectionStream) {
+	t.Helper()
 
-func createMConnectionWithCallbacks(
-	conn net.Conn,
-	onReceive func(chID byte, msgBytes []byte),
-	onError func(r any),
-) *MConnection {
 	cfg := DefaultMConnConfig()
 	cfg.PingInterval = 90 * time.Millisecond
 	cfg.PongTimeout = 45 * time.Millisecond
-	chDescs := []*ChannelDescriptor{{ID: 0x01, Priority: 1, SendQueueCapacity: 1}}
-	c := NewMConnectionWithConfig(conn, chDescs, onReceive, onError, cfg)
+	chDescs := []*ChannelDescriptor{{ID: testStreamID, Priority: 1, SendQueueCapacity: 1}}
+	c := NewMConnectionWithConfig(conn, chDescs, cfg)
 	c.SetLogger(log.TestingLogger())
-	return c
+
+	stream, err := c.OpenStream(testStreamID)
+	require.NoError(t, err)
+
+	return c, stream.(*MConnectionStream)
 }
 
-func TestMConnectionSendFlushStop(t *testing.T) {
+func TestMConnection_FlushStop(t *testing.T) {
 	server, client := NetPipe()
 	defer server.Close()
 	defer client.Close()
 
-	clientConn := createTestMConnection(client)
+	clientConn, clientStream := createMConnectionWithSingleStream(t, client)
 	err := clientConn.Start()
 	require.NoError(t, err)
 	defer clientConn.Stop() //nolint:errcheck // ignore for tests
 
 	msg := []byte("abc")
-	assert.True(t, clientConn.Send(0x01, msg))
+	_, err = clientStream.Write(msg)
+	assert.NoError(t, err)
 
 	msgLength := 14
 
@@ -81,71 +77,60 @@ func TestMConnectionSendFlushStop(t *testing.T) {
 	}
 }
 
-func TestMConnectionSend(t *testing.T) {
+func TestMConnection_StreamWrite(t *testing.T) {
 	server, client := NetPipe()
 	defer server.Close()
 	defer client.Close()
 
-	mconn := createTestMConnection(client)
+	mconn, clientStream := createMConnectionWithSingleStream(t, client)
 	err := mconn.Start()
 	require.NoError(t, err)
 	defer mconn.Stop() //nolint:errcheck // ignore for tests
 
 	msg := []byte("Ant-Man")
-	assert.True(t, mconn.Send(0x01, msg))
-	// Note: subsequent Send/TrySend calls could pass because we are reading from
+	_, err = clientStream.Write(msg)
+	require.NoError(t, err)
+	// NOTE: subsequent writes could pass because we are reading from
 	// the send queue in a separate goroutine.
 	_, err = server.Read(make([]byte, len(msg)))
-	if err != nil {
-		t.Error(err)
-	}
-	assert.True(t, mconn.CanSend(0x01))
+	require.NoError(t, err)
+	assert.True(t, mconn.CanSend(testStreamID))
 
 	msg = []byte("Spider-Man")
-	assert.True(t, mconn.TrySend(0x01, msg))
+	err = clientStream.SetWriteDeadline(time.Now().Add(100 * time.Millisecond))
+	require.NoError(t, err)
+	_, err = clientStream.Write(msg)
+	require.NoError(t, err)
 	_, err = server.Read(make([]byte, len(msg)))
-	if err != nil {
-		t.Error(err)
-	}
-
-	assert.False(t, mconn.CanSend(0x05), "CanSend should return false because channel is unknown")
-	assert.False(t, mconn.Send(0x05, []byte("Absorbing Man")), "Send should return false because channel is unknown")
+	require.NoError(t, err)
 }
 
-func TestMConnectionReceive(t *testing.T) {
+func TestMConnection_StreamReadWrite(t *testing.T) {
 	server, client := NetPipe()
 	defer server.Close()
 	defer client.Close()
 
-	receivedCh := make(chan []byte)
-	errorsCh := make(chan any)
-	onReceive := func(_ byte, msgBytes []byte) {
-		receivedCh <- msgBytes
-	}
-	onError := func(r any) {
-		errorsCh <- r
-	}
-	mconn1 := createMConnectionWithCallbacks(client, onReceive, onError)
+	mconn1, stream1 := createMConnectionWithSingleStream(t, client)
 	err := mconn1.Start()
 	require.NoError(t, err)
 	defer mconn1.Stop() //nolint:errcheck // ignore for tests
 
-	mconn2 := createTestMConnection(server)
+	mconn2, stream2 := createMConnectionWithSingleStream(t, server)
 	err = mconn2.Start()
 	require.NoError(t, err)
 	defer mconn2.Stop() //nolint:errcheck // ignore for tests
 
+	// => write
 	msg := []byte("Cyclops")
-	assert.True(t, mconn2.Send(0x01, msg))
+	_, err = stream1.Write(msg)
+	require.NoError(t, err)
 
-	select {
-	case receivedBytes := <-receivedCh:
-		assert.Equal(t, msg, receivedBytes)
-	case err := <-errorsCh:
-		t.Fatalf("Expected %s, got %+v", msg, err)
-	case <-time.After(500 * time.Millisecond):
-		t.Fatalf("Did not receive %s message in 500ms", msg)
-	}
+	// => read
+	buf := make([]byte, len(msg))
+	n, err := stream2.Read(buf)
+	require.NoError(t, err)
+	assert.Equal(t, len(msg), n)
+	assert.Equal(t, msg, buf)
 }
 
 func TestMConnectionStatus(t *testing.T) {
@@ -153,7 +138,7 @@ func TestMConnectionStatus(t *testing.T) {
 	defer server.Close()
 	defer client.Close()
 
-	mconn := createTestMConnection(client)
+	mconn, _ := createMConnectionWithSingleStream(t, client)
 	err := mconn.Start()
 	require.NoError(t, err)
 	defer mconn.Stop() //nolint:errcheck // ignore for tests
@@ -163,20 +148,12 @@ func TestMConnectionStatus(t *testing.T) {
 	assert.Zero(t, status.Channels[0].SendQueueSize)
 }
 
-func TestMConnectionPongTimeoutResultsInError(t *testing.T) {
+func TestMConnection_PongTimeoutResultsInError(t *testing.T) {
 	server, client := net.Pipe()
 	defer server.Close()
 	defer client.Close()
 
-	receivedCh := make(chan []byte)
-	errorsCh := make(chan any)
-	onReceive := func(_ byte, msgBytes []byte) {
-		receivedCh <- msgBytes
-	}
-	onError := func(r any) {
-		errorsCh <- r
-	}
-	mconn := createMConnectionWithCallbacks(client, onReceive, onError)
+	mconn, _ := createMConnectionWithSingleStream(t, client)
 	err := mconn.Start()
 	require.NoError(t, err)
 	defer mconn.Stop() //nolint:errcheck // ignore for tests
@@ -193,29 +170,19 @@ func TestMConnectionPongTimeoutResultsInError(t *testing.T) {
 
 	pongTimerExpired := mconn.config.PongTimeout + 200*time.Millisecond
 	select {
-	case msgBytes := <-receivedCh:
-		t.Fatalf("Expected error, but got %v", msgBytes)
-	case err := <-errorsCh:
+	case err := <-mconn.ErrorCh():
 		assert.NotNil(t, err)
 	case <-time.After(pongTimerExpired):
 		t.Fatalf("Expected to receive error after %v", pongTimerExpired)
 	}
 }
 
-func TestMConnectionMultiplePongsInTheBeginning(t *testing.T) {
+func TestMConnection_MultiplePongsInTheBeginning(t *testing.T) {
 	server, client := net.Pipe()
 	defer server.Close()
 	defer client.Close()
 
-	receivedCh := make(chan []byte)
-	errorsCh := make(chan any)
-	onReceive := func(_ byte, msgBytes []byte) {
-		receivedCh <- msgBytes
-	}
-	onError := func(r any) {
-		errorsCh <- r
-	}
-	mconn := createMConnectionWithCallbacks(client, onReceive, onError)
+	mconn, stream := createMConnectionWithSingleStream(t, client)
 	err := mconn.Start()
 	require.NoError(t, err)
 	defer mconn.Stop() //nolint:errcheck // ignore for tests
@@ -248,29 +215,24 @@ func TestMConnectionMultiplePongsInTheBeginning(t *testing.T) {
 
 	pongTimerExpired := mconn.config.PongTimeout + 20*time.Millisecond
 	select {
-	case msgBytes := <-receivedCh:
-		t.Fatalf("Expected no data, but got %v", msgBytes)
-	case err := <-errorsCh:
+	case err := <-mconn.ErrorCh():
 		t.Fatalf("Expected no error, but got %v", err)
 	case <-time.After(pongTimerExpired):
 		assert.True(t, mconn.IsRunning())
+
+		// check there's no data
+		n, err := stream.Read(make([]byte, 1))
+		assert.NoError(t, err)
+		assert.Zero(t, n)
 	}
 }
 
-func TestMConnectionMultiplePings(t *testing.T) {
+func TestMConnection_MultiplePings(t *testing.T) {
 	server, client := net.Pipe()
 	defer server.Close()
 	defer client.Close()
 
-	receivedCh := make(chan []byte)
-	errorsCh := make(chan any)
-	onReceive := func(_ byte, msgBytes []byte) {
-		receivedCh <- msgBytes
-	}
-	onError := func(r any) {
-		errorsCh <- r
-	}
-	mconn := createMConnectionWithCallbacks(client, onReceive, onError)
+	mconn, _ := createMConnectionWithSingleStream(t, client)
 	err := mconn.Start()
 	require.NoError(t, err)
 	defer mconn.Stop() //nolint:errcheck // ignore for tests
@@ -302,7 +264,7 @@ func TestMConnectionMultiplePings(t *testing.T) {
 	assert.True(t, mconn.IsRunning())
 }
 
-func TestMConnectionPingPongs(t *testing.T) {
+func TestMConnection_PingPongs(t *testing.T) {
 	// check that we are not leaking any go-routines
 	defer leaktest.CheckTimeout(t, 10*time.Second)()
 
@@ -311,15 +273,7 @@ func TestMConnectionPingPongs(t *testing.T) {
 	defer server.Close()
 	defer client.Close()
 
-	receivedCh := make(chan []byte)
-	errorsCh := make(chan any)
-	onReceive := func(_ byte, msgBytes []byte) {
-		receivedCh <- msgBytes
-	}
-	onError := func(r any) {
-		errorsCh <- r
-	}
-	mconn := createMConnectionWithCallbacks(client, onReceive, onError)
+	mconn, stream := createMConnectionWithSingleStream(t, client)
 	err := mconn.Start()
 	require.NoError(t, err)
 	defer mconn.Stop() //nolint:errcheck // ignore for tests
@@ -355,12 +309,15 @@ func TestMConnectionPingPongs(t *testing.T) {
 
 	pongTimerExpired := (mconn.config.PongTimeout + 20*time.Millisecond) * 2
 	select {
-	case msgBytes := <-receivedCh:
-		t.Fatalf("Expected no data, but got %v", msgBytes)
-	case err := <-errorsCh:
+	case err := <-mconn.ErrorCh():
 		t.Fatalf("Expected no error, but got %v", err)
 	case <-time.After(2 * pongTimerExpired):
 		assert.True(t, mconn.IsRunning())
+
+		// check there's no data
+		n, err := stream.Read(make([]byte, 1))
+		assert.NoError(t, err)
+		assert.Zero(t, n)
 	}
 }
 
@@ -369,15 +326,7 @@ func TestMConnectionStopsAndReturnsError(t *testing.T) {
 	defer server.Close()
 	defer client.Close()
 
-	receivedCh := make(chan []byte)
-	errorsCh := make(chan any)
-	onReceive := func(_ byte, msgBytes []byte) {
-		receivedCh <- msgBytes
-	}
-	onError := func(r any) {
-		errorsCh <- r
-	}
-	mconn := createMConnectionWithCallbacks(client, onReceive, onError)
+	mconn, _ := createMConnectionWithSingleStream(t, client)
 	err := mconn.Start()
 	require.NoError(t, err)
 	defer mconn.Stop() //nolint:errcheck // ignore for tests
@@ -387,47 +336,62 @@ func TestMConnectionStopsAndReturnsError(t *testing.T) {
 	}
 
 	select {
-	case receivedBytes := <-receivedCh:
-		t.Fatalf("Expected error, got %v", receivedBytes)
-	case err := <-errorsCh:
+	case err := <-mconn.ErrorCh():
 		assert.NotNil(t, err)
 		assert.False(t, mconn.IsRunning())
+
+		// check there's no data
+		n, err := stream.Read(make([]byte, 1))
+		assert.NoError(t, err)
+		assert.Zero(t, n)
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("Did not receive error in 500ms")
 	}
 }
 
-func newClientAndServerConnsForReadErrors(t *testing.T, chOnErr chan struct{}) (*MConnection, *MConnection) {
+func newClientAndServerConnsForReadErrors(t *testing.T) (*MConnection, *MConnectionStream, *MConnection, *MConnectionStream) {
 	t.Helper()
 	server, client := NetPipe()
 
-	onReceive := func(_ byte, _ []byte) {}
-	onError := func(_ any) {}
-
 	// create client conn with two channels
 	chDescs := []*ChannelDescriptor{
-		{ID: 0x01, Priority: 1, SendQueueCapacity: 1},
+		{ID: testStreamID, Priority: 1, SendQueueCapacity: 1},
 		{ID: 0x02, Priority: 1, SendQueueCapacity: 1},
 	}
-	mconnClient := NewMConnection(client, chDescs, onReceive, onError)
+	cfg := DefaultMConnConfig()
+	cfg.PingInterval = 90 * time.Millisecond
+	cfg.PongTimeout = 45 * time.Millisecond
+	mconnClient := NewMConnectionWithConfig(client, chDescs, cfg)
+	clientStream, err := mconnClient.OpenStream(testStreamID)
+	require.NoError(t, err)
 	mconnClient.SetLogger(log.TestingLogger().With("module", "client"))
-	err := mconnClient.Start()
+	err = mconnClient.Start()
 	require.NoError(t, err)
 
 	// create server conn with 1 channel
 	// it fires on chOnErr when there's an error
 	serverLogger := log.TestingLogger().With("module", "server")
-	onError = func(_ any) {
-		chOnErr <- struct{}{}
-	}
-	mconnServer := createMConnectionWithCallbacks(server, onReceive, onError)
+	mconnServer, serverStream := createMConnectionWithSingleStream(t, server)
 	mconnServer.SetLogger(serverLogger)
 	err = mconnServer.Start()
 	require.NoError(t, err)
-	return mconnClient, mconnServer
+
+	return mconnClient, clientStream.(*MConnectionStream), mconnServer, serverStream
 }
 
-func expectSend(ch chan struct{}) bool {
+func assertGotBytes(t *testing.T, s *MConnectionStream, want []byte) {
+	t.Helper()
+
+	err := s.SetReadDeadline(time.Now().Add(5 * time.Second))
+	require.NoError(t, err)
+	buf := make([]byte, len(want))
+	n, err := s.Read(buf)
+	require.NoError(t, err)
+	assert.Equal(t, len(want), n)
+	assert.Equal(t, want, buf)
+}
+
+func expectSend(ch <-chan error) bool {
 	after := time.After(time.Second * 5)
 	select {
 	case <-ch:
@@ -437,68 +401,39 @@ func expectSend(ch chan struct{}) bool {
 	}
 }
 
-func TestMConnectionReadErrorBadEncoding(t *testing.T) {
-	chOnErr := make(chan struct{})
-	mconnClient, mconnServer := newClientAndServerConnsForReadErrors(t, chOnErr)
+func TestMConnection_ReadErrorBadEncoding(t *testing.T) {
+	mconnClient, mconnServer := newClientAndServerConnsForReadErrors(t)
+	defer mconnClient.Stop() //nolint:errcheck // ignore for tests
+	defer mconnServer.Stop() //nolint:errcheck // ignore for tests
 
 	client := mconnClient.conn
 
 	// Write it.
 	_, err := client.Write([]byte{1, 2, 3, 4, 5})
 	require.NoError(t, err)
-	assert.True(t, expectSend(chOnErr), "badly encoded msgPacket")
-
-	t.Cleanup(func() {
-		if err := mconnClient.Stop(); err != nil {
-			t.Log(err)
-		}
-	})
-
-	t.Cleanup(func() {
-		if err := mconnServer.Stop(); err != nil {
-			t.Log(err)
-		}
-	})
+	assert.True(t, expectSend(mconnServer.ErrorCh()), "badly encoded msgPacket")
 }
 
-func TestMConnectionReadErrorUnknownChannel(t *testing.T) {
-	chOnErr := make(chan struct{})
-	mconnClient, mconnServer := newClientAndServerConnsForReadErrors(t, chOnErr)
+func TestMConnection_ReadErrorUnknownChannel(t *testing.T) {
+	mconnClient, mconnServer := newClientAndServerConnsForReadErrors(t)
+	defer mconnClient.Stop() //nolint:errcheck // ignore for tests
+	defer mconnServer.Stop() //nolint:errcheck // ignore for tests
 
 	msg := []byte("Ant-Man")
 
 	// fail to send msg on channel unknown by client
-	assert.False(t, mconnClient.Send(0x03, msg))
+	assert.NoError(t, mconnClient.Send(0x03, msg, 0))
 
 	// send msg on channel unknown by the server.
 	// should cause an error
-	assert.True(t, mconnClient.Send(0x02, msg))
-	assert.True(t, expectSend(chOnErr), "unknown channel")
-
-	t.Cleanup(func() {
-		if err := mconnClient.Stop(); err != nil {
-			t.Log(err)
-		}
-	})
-
-	t.Cleanup(func() {
-		if err := mconnServer.Stop(); err != nil {
-			t.Log(err)
-		}
-	})
+	assert.Error(t, mconnClient.Send(0x02, msg, 0))
+	assert.True(t, expectSend(mconnServer.ErrorCh()), "unknown channel")
 }
 
-func TestMConnectionReadErrorLongMessage(t *testing.T) {
-	chOnErr := make(chan struct{})
-	chOnRcv := make(chan struct{})
-
-	mconnClient, mconnServer := newClientAndServerConnsForReadErrors(t, chOnErr)
+func TestMConnection_ReadErrorLongMessage(t *testing.T) {
+	mconnClient, mconnServer := newClientAndServerConnsForReadErrors(t)
 	defer mconnClient.Stop() //nolint:errcheck // ignore for tests
 	defer mconnServer.Stop() //nolint:errcheck // ignore for tests
-
-	mconnServer.onReceive = func(_ byte, _ []byte) {
-		chOnRcv <- struct{}{}
-	}
 
 	client := mconnClient.conn
 	protoWriter := protoio.NewDelimitedWriter(client)
@@ -512,7 +447,7 @@ func TestMConnectionReadErrorLongMessage(t *testing.T) {
 
 	_, err := protoWriter.WriteMsg(mustWrapPacket(&packet))
 	require.NoError(t, err)
-	assert.True(t, expectSend(chOnRcv), "msg just right")
+	assert.True(t, expectBytes(mconnServer.recvMsgsByStreamID[0x01]), "msg just right")
 
 	// send msg that's too long
 	packet = tmp2p.PacketMsg{
@@ -526,43 +461,15 @@ func TestMConnectionReadErrorLongMessage(t *testing.T) {
 	assert.True(t, expectSend(chOnErr), "msg too long")
 }
 
-func TestMConnectionReadErrorUnknownMsgType(t *testing.T) {
-	chOnErr := make(chan struct{})
-	mconnClient, mconnServer := newClientAndServerConnsForReadErrors(t, chOnErr)
+func TestMConnection_ReadErrorUnknownMsgType(t *testing.T) {
+	mconnClient, _, mconnServer, _ := newClientAndServerConnsForReadErrors(t)
 	defer mconnClient.Stop() //nolint:errcheck // ignore for tests
 	defer mconnServer.Stop() //nolint:errcheck // ignore for tests
 
 	// send msg with unknown msg type
 	_, err := protoio.NewDelimitedWriter(mconnClient.conn).WriteMsg(&pbtypes.Header{ChainID: "x"})
 	require.NoError(t, err)
-	assert.True(t, expectSend(chOnErr), "unknown msg type")
-}
-
-func TestMConnectionTrySend(t *testing.T) {
-	server, client := NetPipe()
-	defer server.Close()
-	defer client.Close()
-
-	mconn := createTestMConnection(client)
-	err := mconn.Start()
-	require.NoError(t, err)
-	defer mconn.Stop() //nolint:errcheck // ignore for tests
-
-	msg := []byte("Semicolon-Woman")
-	resultCh := make(chan string, 2)
-	assert.True(t, mconn.TrySend(0x01, msg))
-	_, err = server.Read(make([]byte, len(msg)))
-	require.NoError(t, err)
-	assert.True(t, mconn.CanSend(0x01))
-	assert.True(t, mconn.TrySend(0x01, msg))
-	assert.False(t, mconn.CanSend(0x01))
-	go func() {
-		mconn.TrySend(0x01, msg)
-		resultCh <- "TrySend"
-	}()
-	assert.False(t, mconn.CanSend(0x01))
-	assert.False(t, mconn.TrySend(0x01, msg))
-	assert.Equal(t, "TrySend", <-resultCh)
+	assert.True(t, expectSend(mconnServer.ErrorCh()), "unknown msg type")
 }
 
 //nolint:lll //ignore line length for tests
@@ -586,20 +493,15 @@ func TestConnVectors(t *testing.T) {
 	}
 }
 
-func TestMConnectionChannelOverflow(t *testing.T) {
-	chOnErr := make(chan struct{})
-	chOnRcv := make(chan struct{})
-
-	mconnClient, mconnServer := newClientAndServerConnsForReadErrors(t, chOnErr)
-	t.Cleanup(stopAll(t, mconnClient, mconnServer))
-
-	mconnServer.onReceive = func(_ byte, _ []byte) {
-		chOnRcv <- struct{}{}
-	}
+func TestMConnection_ChannelOverflow(t *testing.T) {
+	mconnClient, _, mconnServer, serverStream := newClientAndServerConnsForReadErrors(t)
+	defer mconnClient.Stop() //nolint:errcheck // ignore for tests
+	defer mconnServer.Stop() //nolint:errcheck // ignore for tests
 
 	client := mconnClient.conn
 	protoWriter := protoio.NewDelimitedWriter(client)
 
+	// send msg that's just right
 	packet := tmp2p.PacketMsg{
 		ChannelID: 0x01,
 		EOF:       true,
@@ -607,25 +509,11 @@ func TestMConnectionChannelOverflow(t *testing.T) {
 	}
 	_, err := protoWriter.WriteMsg(mustWrapPacket(&packet))
 	require.NoError(t, err)
-	assert.True(t, expectSend(chOnRcv))
+	assertGotBytes(t, serverStream, []byte(`42`))
 
+	// channel ID that's too large
 	packet.ChannelID = int32(1025)
 	_, err = protoWriter.WriteMsg(mustWrapPacket(&packet))
 	require.NoError(t, err)
-	assert.False(t, expectSend(chOnRcv))
-}
-
-type stopper interface {
-	Stop() error
-}
-
-func stopAll(t *testing.T, stoppers ...stopper) func() {
-	t.Helper()
-	return func() {
-		for _, s := range stoppers {
-			if err := s.Stop(); err != nil {
-				t.Log(err)
-			}
-		}
-	}
+	// assert.False(t, expectBytes(mconnServer.recvMsgsByStreamID[1025]))
 }

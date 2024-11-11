@@ -382,14 +382,9 @@ func (mt *MultiplexTransport) upgrade(
 		}
 	}
 
-	// TODO: params
-	onReceive := func(_ byte, _ []byte) {}
-	onError := func(_ any) {}
-
 	return conn.NewMConnectionWithConfig(
 		secretConn,
 		[]*conn.ChannelDescriptor{},
-		onReceive,
 		onError,
 		conn.MConnConfig{},
 	), remotePubKey, nil

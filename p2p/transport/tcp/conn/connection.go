@@ -41,9 +41,11 @@ const (
 	defaultSendQueueCapacity = 1
 	defaultSendRate          = int64(512000) // 500KB/s
 	defaultRecvRate          = int64(512000) // 500KB/s
-	defaultSendTimeout       = 10 * time.Second
 	defaultPingInterval      = 60 * time.Second
 	defaultPongTimeout       = 45 * time.Second
+
+	// Capacity of the receive channel for each stream.
+	maxRecvChanCap = 100
 )
 
 type (
@@ -52,6 +54,7 @@ type (
 )
 
 /*
+TODO: rewrite
 Each peer has one `MConnection` (multiplex connection) instance.
 
 __multiplex__ *noun* a system or signal involving simultaneous transmission of
@@ -65,14 +68,10 @@ initialization of the connection.
 There are two methods for sending messages:
 
 	func (m MConnection) Send(chID byte, msgBytes []byte) bool {}
-	func (m MConnection) TrySend(chID byte, msgBytes []byte}) bool {}
 
 `Send(chID, msgBytes)` is a blocking call that waits until `msg` is
 successfully queued for the channel with the given id byte `chID`, or until the
 request times out.  The message `msg` is serialized using Protobuf.
-
-`TrySend(chID, msgBytes)` is a nonblocking call that returns false if the
-channel's queue is full.
 
 Inbound message bytes are handled with an onReceive callback function.
 */
@@ -88,10 +87,10 @@ type MConnection struct {
 	pong          chan struct{}
 	channels      []*Channel
 	channelsIdx   map[byte]*Channel
-	onReceive     receiveCbFunc
-	onError       errorCbFunc
-	errored       uint32
-	config        MConnConfig
+	// streamID -> list of messages
+	recvMsgsByStreamID map[byte]chan []byte
+	errorCh            chan error
+	config             MConnConfig
 
 	// Closing quitSendRoutine will cause the sendRoutine to eventually quit.
 	// doneSendRoutine is closed when the sendRoutine actually quits.
@@ -156,44 +155,29 @@ func DefaultMConnConfig() MConnConfig {
 }
 
 // NewMConnection wraps net.Conn and creates multiplex connection.
-func NewMConnection(
-	conn net.Conn,
-	chDescs []*ChannelDescriptor,
-	onReceive receiveCbFunc,
-	onError errorCbFunc,
-) *MConnection {
-	return NewMConnectionWithConfig(
-		conn,
-		chDescs,
-		onReceive,
-		onError,
-		DefaultMConnConfig())
+func NewMConnection(conn net.Conn, chDescs []*ChannelDescriptor) *MConnection {
+	return NewMConnectionWithConfig(conn, chDescs, DefaultMConnConfig())
 }
 
-// NewMConnectionWithConfig wraps net.Conn and creates multiplex connection with a config.
-func NewMConnectionWithConfig(
-	conn net.Conn,
-	chDescs []*ChannelDescriptor,
-	onReceive receiveCbFunc,
-	onError errorCbFunc,
-	config MConnConfig,
-) *MConnection {
+// NewMConnectionWithConfig wraps net.Conn and creates multiplex connection
+// using the given config.
+func NewMConnectionWithConfig(conn net.Conn, chDescs []*ChannelDescriptor, config MConnConfig) *MConnection {
 	if config.PongTimeout >= config.PingInterval {
 		panic("pongTimeout must be less than pingInterval (otherwise, next ping will reset pong timer)")
 	}
 
 	mconn := &MConnection{
-		conn:          conn,
-		bufConnReader: bufio.NewReaderSize(conn, minReadBufferSize),
-		bufConnWriter: bufio.NewWriterSize(conn, minWriteBufferSize),
-		sendMonitor:   flow.New(0, 0),
-		recvMonitor:   flow.New(0, 0),
-		send:          make(chan struct{}, 1),
-		pong:          make(chan struct{}, 1),
-		onReceive:     onReceive,
-		onError:       onError,
-		config:        config,
-		created:       time.Now(),
+		conn:               conn,
+		bufConnReader:      bufio.NewReaderSize(conn, minReadBufferSize),
+		bufConnWriter:      bufio.NewWriterSize(conn, minWriteBufferSize),
+		sendMonitor:        flow.New(0, 0),
+		recvMonitor:        flow.New(0, 0),
+		send:               make(chan struct{}, 1),
+		pong:               make(chan struct{}, 1),
+		recvMsgsByStreamID: make(map[byte]chan []byte),
+		errorCh:            make(chan error, 1),
+		config:             config,
+		created:            time.Now(),
 	}
 
 	// Create channels
@@ -314,6 +298,11 @@ func (c *MConnection) FlushStop() {
 	// c.Stop()
 }
 
+// ErrorCh returns a channel that will receive errors from the connection.
+func (c *MConnection) ErrorCh() <-chan error {
+	return c.errorCh
+}
+
 // OnStop implements BaseService.
 func (c *MConnection) OnStop() {
 	if c.stopServices() {
@@ -340,8 +329,8 @@ func (c *MConnection) RemoteAddr() net.Addr {
 	return c.conn.RemoteAddr()
 }
 
-func (c *MConnection) OpenStream(byte) (abstract.Stream, error) {
-	return MConnectionStream{c.conn}, nil
+func (c *MConnection) OpenStream(streamID byte) (abstract.Stream, error) {
+	return MConnectionStream{conn: c, streadID: streamID}, nil
 }
 
 func (c *MConnection) FlushAndClose(string) error {
@@ -373,71 +362,38 @@ func (c *MConnection) _recover() {
 	}
 }
 
-func (c *MConnection) stopForError(r any) {
+func (c *MConnection) stopForError(r error) {
 	if err := c.Stop(); err != nil {
 		c.Logger.Error("Error stopping connection", "err", err)
 	}
-	if atomic.CompareAndSwapUint32(&c.errored, 0, 1) {
-		if c.onError != nil {
-			c.onError(r)
-		}
+	select {
+	case c.errorCh <- r:
+	default:
 	}
 }
 
-// Queues a message to be sent to channel.
-func (c *MConnection) Send(chID byte, msgBytes []byte) bool {
+func (c *MConnection) sendBytes(chID byte, msgBytes []byte, timeout time.Duration) error {
 	if !c.IsRunning() {
-		return false
+		return ErrNotRunning
 	}
 
-	c.Logger.Debug("Send", "channel", chID, "conn", c, "msgBytes", log.NewLazySprintf("%X", msgBytes))
+	c.Logger.Debug("Send",
+		"streamID", chID,
+		"msgBytes", log.NewLazySprintf("%X", msgBytes),
+		"timeout", timeout)
 
-	// Send message to channel.
-	channel, ok := c.channelsIdx[chID]
-	if !ok {
-		c.Logger.Error(fmt.Sprintf("Cannot send bytes, unknown channel %X", chID))
-		return false
+	channel := c.channelsIdx[chID]
+	if err := channel.sendBytes(msgBytes, timeout); err != nil {
+		c.Logger.Error("Send failed", "err", err)
+		return err
 	}
 
-	success := channel.sendBytes(msgBytes)
-	if success {
-		// Wake up sendRoutine if necessary
-		select {
-		case c.send <- struct{}{}:
-		default:
-		}
-	} else {
-		c.Logger.Debug("Send failed", "channel", chID, "conn", c, "msgBytes", log.NewLazySprintf("%X", msgBytes))
+	// Wake up sendRoutine if necessary
+	select {
+	case c.send <- struct{}{}:
+	default:
 	}
-	return success
-}
-
-// Queues a message to be sent to channel.
-// Nonblocking, returns true if successful.
-func (c *MConnection) TrySend(chID byte, msgBytes []byte) bool {
-	if !c.IsRunning() {
-		return false
-	}
-
-	c.Logger.Debug("TrySend", "channel", chID, "conn", c, "msgBytes", log.NewLazySprintf("%X", msgBytes))
-
-	// Send message to channel.
-	channel, ok := c.channelsIdx[chID]
-	if !ok {
-		c.Logger.Error(fmt.Sprintf("Cannot send bytes, unknown channel %X", chID))
-		return false
-	}
-
-	ok = channel.trySendBytes(msgBytes)
-	if ok {
-		// Wake up sendRoutine if necessary
-		select {
-		case c.send <- struct{}{}:
-		default:
-		}
-	}
-
-	return ok
+	return nil
 }
 
 // CanSend returns true if you can send more data onto the chID, false
@@ -613,10 +569,10 @@ func (c *MConnection) sendPacketMsgOnChannel(w protoio.Writer, sendChannel *Chan
 	return n, false
 }
 
-// recvRoutine reads PacketMsgs and reconstructs the message using the channels' "recving" buffer.
-// After a whole message has been assembled, it's pushed to onReceive().
-// Blocks depending on how the connection is throttled.
-// Otherwise, it never blocks.
+// recvRoutine reads PacketMsgs and reconstructs the message using the
+// channels' "recving" buffer. After a whole message has been assembled, it's
+// pushed to an internal queue, which is accessible via Read. Blocks depending
+// on how the connection is throttled. Otherwise, it never blocks.
 func (c *MConnection) recvRoutine() {
 	defer c._recover()
 
@@ -703,9 +659,8 @@ FOR_LOOP:
 				break FOR_LOOP
 			}
 			if msgBytes != nil {
-				c.Logger.Debug("Received bytes", "chID", channelID, "msgBytes", msgBytes)
-				// NOTE: This means the reactor.Receive runs in the same thread as the p2p recv routine
-				c.onReceive(channelID, msgBytes)
+				c.Logger.Debug("Received bytes", "streamID", channelID, "bytes", msgBytes)
+				c.pushRecvMsg(channelID, msgBytes)
 			}
 		default:
 			err := fmt.Errorf("unknown message type %v", reflect.TypeOf(packet))
@@ -717,6 +672,23 @@ FOR_LOOP:
 
 	// Cleanup
 	close(c.pong)
+}
+
+func (c *MConnection) pushRecvMsg(streamID byte, msgBytes []byte) {
+	// Init.
+	_, ok := c.recvMsgsByStreamID[streamID]
+	if !ok {
+		c.recvMsgsByStreamID[streamID] = make(chan []byte, maxRecvChanCap)
+	}
+
+	// Drop the message if the buffer is full.
+	if len(c.recvMsgsByStreamID[streamID]) >= maxRecvChanCap {
+		c.Logger.Error("Receive buffer is full. No one is reading from this stream", "streamID", streamID, "max", maxRecvChanCap)
+		return
+	}
+
+	// Push the message.
+	c.recvMsgsByStreamID[streamID] <- msgBytes
 }
 
 // not goroutine-safe.
@@ -822,27 +794,16 @@ func (ch *Channel) SetLogger(l log.Logger) {
 
 // Queues message to send to this channel.
 // Goroutine-safe
-// Times out (and returns false) after defaultSendTimeout.
-func (ch *Channel) sendBytes(bytes []byte) bool {
+// It returns ErrTimeout if bytes were not queued after timeout.
+func (ch *Channel) sendBytes(bytes []byte, timeout time.Duration) error {
 	select {
 	case ch.sendQueue <- bytes:
 		atomic.AddInt32(&ch.sendQueueSize, 1)
-		return true
-	case <-time.After(defaultSendTimeout):
-		return false
-	}
-}
-
-// Queues message to send to this channel.
-// Nonblocking, returns true if successful.
-// Goroutine-safe.
-func (ch *Channel) trySendBytes(bytes []byte) bool {
-	select {
-	case ch.sendQueue <- bytes:
-		atomic.AddInt32(&ch.sendQueueSize, 1)
-		return true
-	default:
-		return false
+		return nil
+	case <-ch.conn.Quit():
+		return ErrNotRunning
+	case <-time.After(timeout):
+		return ErrTimeout
 	}
 }
 
@@ -965,20 +926,99 @@ func mustWrapPacketInto(pb proto.Message, dst *tmp2p.Packet) {
 
 // MCConnectionStream is just a wrapper around the original net.Conn.
 type MConnectionStream struct {
-	net.Conn
+	conn     *MConnection
+	streadID byte
+
+	deadline      time.Time
+	readDeadline  time.Time
+	writeDeadline time.Time
 }
 
+// Read reads messages from the internal queue of the stream.
 func (s MConnectionStream) Read(b []byte) (n int, err error) {
-	return s.Conn.Read(b)
+	// If there are messages to read, read them.
+	if _, ok := s.conn.recvMsgsByStreamID[s.streadID]; ok {
+		readTimeout := s.readTimeout()
+		if readTimeout > 0 { // read with timeout
+			select {
+			case msgBytes := <-s.conn.recvMsgsByStreamID[s.streadID]:
+				if len(b) < len(msgBytes) {
+					return len(msgBytes), io.ErrShortBuffer
+				}
+				n = copy(b, msgBytes)
+				return n, nil
+			case <-time.After(readTimeout):
+				return 0, ErrTimeout
+			}
+		} else { // read without timeout
+			msgBytes := <-s.conn.recvMsgsByStreamID[s.streadID]
+			if len(b) < len(msgBytes) {
+				return len(msgBytes), io.ErrShortBuffer
+			}
+			n = copy(b, msgBytes)
+			return n, nil
+		}
+	}
+
+	// No messages to read.
+	return 0, nil
 }
 
 func (s MConnectionStream) Write(b []byte) (n int, err error) {
-	return s.Conn.Write(b)
+	if err := s.conn.sendBytes(s.streadID, b, s.writeTimeout()); err != nil {
+		return 0, err
+	}
+	return len(b), nil
 }
 
+// Close does nothing.
 func (MConnectionStream) Close() error {
 	return nil
 }
-func (s MConnectionStream) SetDeadline(t time.Time) error      { return s.Conn.SetReadDeadline(t) }
-func (s MConnectionStream) SetReadDeadline(t time.Time) error  { return s.Conn.SetReadDeadline(t) }
-func (s MConnectionStream) SetWriteDeadline(t time.Time) error { return s.Conn.SetWriteDeadline(t) }
+
+// SetDeadline sets both the read and write deadlines for this stream. It does not set the
+// read nor write deadline on the underlying TCP connection! A zero value for t means
+// Conn.Read and Conn.Write will not time out.
+//
+// Only applies to new reads and writes.
+func (s MConnectionStream) SetDeadline(t time.Time) error { s.deadline = t; return nil }
+
+// SetReadDeadline sets the read deadline for this stream. It does not set the
+// read deadline on the underlying TCP connection! A zero value for t means
+// Conn.Read will not time out.
+//
+// Only applies to new reads.
+func (s MConnectionStream) SetReadDeadline(t time.Time) error { s.readDeadline = t; return nil }
+
+// SetWriteDeadline sets the write deadline for this stream. It does not set the
+// write deadline on the underlying TCP connection! A zero value for t means
+// Conn.Write will not time out.
+//
+// Only applies to new writes.
+func (s MConnectionStream) SetWriteDeadline(t time.Time) error { s.writeDeadline = t; return nil }
+
+func (s MConnectionStream) readTimeout() time.Duration {
+	now := time.Now()
+	switch {
+	case s.readDeadline.IsZero() && s.deadline.IsZero():
+		return 0
+	case s.readDeadline.After(now):
+		return s.readDeadline.Sub(now)
+	case s.deadline.After(now):
+		return s.deadline.Sub(now)
+	}
+	return 0
+}
+
+func (s MConnectionStream) writeTimeout() time.Duration {
+	now := time.Now()
+	switch {
+	case s.writeDeadline.IsZero() && s.deadline.IsZero():
+		return 0
+	case s.writeDeadline.After(now):
+		return s.writeDeadline.Sub(now)
+	case s.deadline.After(now):
+		return s.deadline.Sub(now)
+	}
+	return 0
+}
