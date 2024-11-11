@@ -384,8 +384,8 @@ func (mt *MultiplexTransport) upgrade(
 
 	return conn.NewMConnectionWithConfig(
 		secretConn,
+		// TODO: will this be filled in later?
 		[]*conn.ChannelDescriptor{},
-		onError,
 		conn.MConnConfig{},
 	), remotePubKey, nil
 }

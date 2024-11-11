@@ -48,11 +48,6 @@ const (
 	maxRecvChanCap = 100
 )
 
-type (
-	receiveCbFunc func(chID byte, msgBytes []byte)
-	errorCbFunc   func(any)
-)
-
 /*
 TODO: rewrite
 Each peer has one `MConnection` (multiplex connection) instance.
@@ -330,7 +325,7 @@ func (c *MConnection) RemoteAddr() net.Addr {
 }
 
 func (c *MConnection) OpenStream(streamID byte) (abstract.Stream, error) {
-	return MConnectionStream{conn: c, streadID: streamID}, nil
+	return &MConnectionStream{conn: c, streadID: streamID}, nil
 }
 
 func (c *MConnection) FlushAndClose(string) error {
@@ -950,14 +945,15 @@ func (s MConnectionStream) Read(b []byte) (n int, err error) {
 			case <-time.After(readTimeout):
 				return 0, ErrTimeout
 			}
-		} else { // read without timeout
-			msgBytes := <-s.conn.recvMsgsByStreamID[s.streadID]
-			if len(b) < len(msgBytes) {
-				return len(msgBytes), io.ErrShortBuffer
-			}
-			n = copy(b, msgBytes)
-			return n, nil
 		}
+
+		// read without timeout
+		msgBytes := <-s.conn.recvMsgsByStreamID[s.streadID]
+		if len(b) < len(msgBytes) {
+			return len(msgBytes), io.ErrShortBuffer
+		}
+		n = copy(b, msgBytes)
+		return n, nil
 	}
 
 	// No messages to read.
@@ -981,21 +977,21 @@ func (MConnectionStream) Close() error {
 // Conn.Read and Conn.Write will not time out.
 //
 // Only applies to new reads and writes.
-func (s MConnectionStream) SetDeadline(t time.Time) error { s.deadline = t; return nil }
+func (s *MConnectionStream) SetDeadline(t time.Time) error { s.deadline = t; return nil }
 
 // SetReadDeadline sets the read deadline for this stream. It does not set the
 // read deadline on the underlying TCP connection! A zero value for t means
 // Conn.Read will not time out.
 //
 // Only applies to new reads.
-func (s MConnectionStream) SetReadDeadline(t time.Time) error { s.readDeadline = t; return nil }
+func (s *MConnectionStream) SetReadDeadline(t time.Time) error { s.readDeadline = t; return nil }
 
 // SetWriteDeadline sets the write deadline for this stream. It does not set the
 // write deadline on the underlying TCP connection! A zero value for t means
 // Conn.Write will not time out.
 //
 // Only applies to new writes.
-func (s MConnectionStream) SetWriteDeadline(t time.Time) error { s.writeDeadline = t; return nil }
+func (s *MConnectionStream) SetWriteDeadline(t time.Time) error { s.writeDeadline = t; return nil }
 
 func (s MConnectionStream) readTimeout() time.Duration {
 	now := time.Now()

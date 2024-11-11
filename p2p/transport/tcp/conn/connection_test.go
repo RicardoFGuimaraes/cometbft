@@ -326,7 +326,7 @@ func TestMConnectionStopsAndReturnsError(t *testing.T) {
 	defer server.Close()
 	defer client.Close()
 
-	mconn, _ := createMConnectionWithSingleStream(t, client)
+	mconn, stream := createMConnectionWithSingleStream(t, client)
 	err := mconn.Start()
 	require.NoError(t, err)
 	defer mconn.Stop() //nolint:errcheck // ignore for tests
@@ -349,6 +349,7 @@ func TestMConnectionStopsAndReturnsError(t *testing.T) {
 	}
 }
 
+//nolint:unparam
 func newClientAndServerConnsForReadErrors(t *testing.T) (*MConnection, *MConnectionStream, *MConnection, *MConnectionStream) {
 	t.Helper()
 	server, client := NetPipe()
@@ -379,7 +380,7 @@ func newClientAndServerConnsForReadErrors(t *testing.T) (*MConnection, *MConnect
 	return mconnClient, clientStream.(*MConnectionStream), mconnServer, serverStream
 }
 
-func assertGotBytes(t *testing.T, s *MConnectionStream, want []byte) {
+func assertBytes(t *testing.T, s *MConnectionStream, want []byte) {
 	t.Helper()
 
 	err := s.SetReadDeadline(time.Now().Add(5 * time.Second))
@@ -391,7 +392,7 @@ func assertGotBytes(t *testing.T, s *MConnectionStream, want []byte) {
 	assert.Equal(t, want, buf)
 }
 
-func expectSend(ch <-chan error) bool {
+func gotError(ch <-chan error) bool {
 	after := time.After(time.Second * 5)
 	select {
 	case <-ch:
@@ -402,36 +403,41 @@ func expectSend(ch <-chan error) bool {
 }
 
 func TestMConnection_ReadErrorBadEncoding(t *testing.T) {
-	mconnClient, mconnServer := newClientAndServerConnsForReadErrors(t)
+	mconnClient, _, mconnServer, _ := newClientAndServerConnsForReadErrors(t)
 	defer mconnClient.Stop() //nolint:errcheck // ignore for tests
 	defer mconnServer.Stop() //nolint:errcheck // ignore for tests
 
+	// send badly encoded data
 	client := mconnClient.conn
-
-	// Write it.
 	_, err := client.Write([]byte{1, 2, 3, 4, 5})
 	require.NoError(t, err)
-	assert.True(t, expectSend(mconnServer.ErrorCh()), "badly encoded msgPacket")
+
+	assert.True(t, gotError(mconnServer.ErrorCh()), "badly encoded msgPacket")
 }
 
 func TestMConnection_ReadErrorUnknownChannel(t *testing.T) {
-	mconnClient, mconnServer := newClientAndServerConnsForReadErrors(t)
+	mconnClient, _, mconnServer, _ := newClientAndServerConnsForReadErrors(t)
 	defer mconnClient.Stop() //nolint:errcheck // ignore for tests
 	defer mconnServer.Stop() //nolint:errcheck // ignore for tests
 
 	msg := []byte("Ant-Man")
 
-	// fail to send msg on channel unknown by client
-	assert.NoError(t, mconnClient.Send(0x03, msg, 0))
+	// send msg that has unknown channel
+	client := mconnClient.conn
+	protoWriter := protoio.NewDelimitedWriter(client)
+	packet := tmp2p.PacketMsg{
+		ChannelID: 0x03,
+		EOF:       true,
+		Data:      msg,
+	}
+	_, err := protoWriter.WriteMsg(mustWrapPacket(&packet))
+	require.NoError(t, err)
 
-	// send msg on channel unknown by the server.
-	// should cause an error
-	assert.Error(t, mconnClient.Send(0x02, msg, 0))
-	assert.True(t, expectSend(mconnServer.ErrorCh()), "unknown channel")
+	assert.True(t, gotError(mconnServer.ErrorCh()), "unknown channel")
 }
 
 func TestMConnection_ReadErrorLongMessage(t *testing.T) {
-	mconnClient, mconnServer := newClientAndServerConnsForReadErrors(t)
+	mconnClient, _, mconnServer, serverStream := newClientAndServerConnsForReadErrors(t)
 	defer mconnClient.Stop() //nolint:errcheck // ignore for tests
 	defer mconnServer.Stop() //nolint:errcheck // ignore for tests
 
@@ -439,15 +445,16 @@ func TestMConnection_ReadErrorLongMessage(t *testing.T) {
 	protoWriter := protoio.NewDelimitedWriter(client)
 
 	// send msg that's just right
+	msg := make([]byte, mconnClient.config.MaxPacketMsgPayloadSize)
 	packet := tmp2p.PacketMsg{
 		ChannelID: 0x01,
 		EOF:       true,
-		Data:      make([]byte, mconnClient.config.MaxPacketMsgPayloadSize),
+		Data:      msg,
 	}
 
 	_, err := protoWriter.WriteMsg(mustWrapPacket(&packet))
 	require.NoError(t, err)
-	assert.True(t, expectBytes(mconnServer.recvMsgsByStreamID[0x01]), "msg just right")
+	assertBytes(t, serverStream, msg)
 
 	// send msg that's too long
 	packet = tmp2p.PacketMsg{
@@ -458,7 +465,7 @@ func TestMConnection_ReadErrorLongMessage(t *testing.T) {
 
 	_, err = protoWriter.WriteMsg(mustWrapPacket(&packet))
 	require.Error(t, err)
-	assert.True(t, expectSend(chOnErr), "msg too long")
+	assert.True(t, gotError(mconnServer.ErrorCh()), "msg too long")
 }
 
 func TestMConnection_ReadErrorUnknownMsgType(t *testing.T) {
@@ -469,7 +476,7 @@ func TestMConnection_ReadErrorUnknownMsgType(t *testing.T) {
 	// send msg with unknown msg type
 	_, err := protoio.NewDelimitedWriter(mconnClient.conn).WriteMsg(&pbtypes.Header{ChainID: "x"})
 	require.NoError(t, err)
-	assert.True(t, expectSend(mconnServer.ErrorCh()), "unknown msg type")
+	assert.True(t, gotError(mconnServer.ErrorCh()), "unknown msg type")
 }
 
 //nolint:lll //ignore line length for tests
@@ -509,7 +516,7 @@ func TestMConnection_ChannelOverflow(t *testing.T) {
 	}
 	_, err := protoWriter.WriteMsg(mustWrapPacket(&packet))
 	require.NoError(t, err)
-	assertGotBytes(t, serverStream, []byte(`42`))
+	assertBytes(t, serverStream, []byte(`42`))
 
 	// channel ID that's too large
 	packet.ChannelID = int32(1025)
