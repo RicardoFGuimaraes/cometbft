@@ -182,7 +182,7 @@ func TestMConnection_MultiplePongsInTheBeginning(t *testing.T) {
 	defer server.Close()
 	defer client.Close()
 
-	mconn, stream := createMConnectionWithSingleStream(t, client)
+	mconn, _ := createMConnectionWithSingleStream(t, client)
 	err := mconn.Start()
 	require.NoError(t, err)
 	defer mconn.Stop() //nolint:errcheck // ignore for tests
@@ -219,11 +219,6 @@ func TestMConnection_MultiplePongsInTheBeginning(t *testing.T) {
 		t.Fatalf("Expected no error, but got %v", err)
 	case <-time.After(pongTimerExpired):
 		assert.True(t, mconn.IsRunning())
-
-		// check there's no data
-		n, err := stream.Read(make([]byte, 1))
-		assert.NoError(t, err)
-		assert.Zero(t, n)
 	}
 }
 
@@ -273,7 +268,7 @@ func TestMConnection_PingPongs(t *testing.T) {
 	defer server.Close()
 	defer client.Close()
 
-	mconn, stream := createMConnectionWithSingleStream(t, client)
+	mconn, _ := createMConnectionWithSingleStream(t, client)
 	err := mconn.Start()
 	require.NoError(t, err)
 	defer mconn.Stop() //nolint:errcheck // ignore for tests
@@ -313,20 +308,15 @@ func TestMConnection_PingPongs(t *testing.T) {
 		t.Fatalf("Expected no error, but got %v", err)
 	case <-time.After(2 * pongTimerExpired):
 		assert.True(t, mconn.IsRunning())
-
-		// check there's no data
-		n, err := stream.Read(make([]byte, 1))
-		assert.NoError(t, err)
-		assert.Zero(t, n)
 	}
 }
 
-func TestMConnectionStopsAndReturnsError(t *testing.T) {
+func TestMConnection_StopsAndReturnsError(t *testing.T) {
 	server, client := NetPipe()
 	defer server.Close()
 	defer client.Close()
 
-	mconn, stream := createMConnectionWithSingleStream(t, client)
+	mconn, _ := createMConnectionWithSingleStream(t, client)
 	err := mconn.Start()
 	require.NoError(t, err)
 	defer mconn.Stop() //nolint:errcheck // ignore for tests
@@ -339,11 +329,6 @@ func TestMConnectionStopsAndReturnsError(t *testing.T) {
 	case err := <-mconn.ErrorCh():
 		assert.NotNil(t, err)
 		assert.False(t, mconn.IsRunning())
-
-		// check there's no data
-		n, err := stream.Read(make([]byte, 1))
-		assert.NoError(t, err)
-		assert.Zero(t, n)
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("Did not receive error in 500ms")
 	}

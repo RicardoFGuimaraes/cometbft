@@ -789,7 +789,18 @@ func (ch *Channel) SetLogger(l log.Logger) {
 // Queues message to send to this channel.
 // Goroutine-safe
 // It returns ErrTimeout if bytes were not queued after timeout.
+// If timeout is zero, it will wait forever.
 func (ch *Channel) sendBytes(bytes []byte, timeout time.Duration) error {
+	if timeout == 0 {
+		select {
+		case ch.sendQueue <- bytes:
+			atomic.AddInt32(&ch.sendQueueSize, 1)
+			return nil
+		case <-ch.conn.Quit():
+			return ErrNotRunning
+		}
+	}
+
 	select {
 	case ch.sendQueue <- bytes:
 		atomic.AddInt32(&ch.sendQueueSize, 1)
