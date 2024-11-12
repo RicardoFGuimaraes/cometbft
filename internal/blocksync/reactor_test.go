@@ -399,6 +399,7 @@ func TestCheckSwitchToConsensusLastHeightZero(t *testing.T) {
 
 func ExtendedCommitNetworkHelper(t *testing.T, maxBlockHeight int64, enableVoteExtensionAt int64, invalidBlockHeightAt int64) {
 	t.Helper()
+
 	config = test.ResetTestRoot("blocksync_reactor_test")
 	defer os.RemoveAll(config.RootDir)
 	genDoc, privVals := randGenesisDoc()
