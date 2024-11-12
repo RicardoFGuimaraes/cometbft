@@ -157,14 +157,14 @@ conR:
 func (*Reactor) StreamDescriptors() []abstract.StreamDescriptor {
 	// TODO optimize
 	return []abstract.StreamDescriptor{
-		&tcpconn.ChannelDescriptor{
+		tcpconn.ChannelDescriptor{
 			ID:                  StateChannel,
 			Priority:            6,
 			SendQueueCapacity:   100,
 			RecvMessageCapacity: maxMsgSize,
 			MessageTypeI:        &cmtcons.Message{},
 		},
-		&tcpconn.ChannelDescriptor{
+		tcpconn.ChannelDescriptor{
 			ID: DataChannel, // maybe split between gossiping current block and catchup stuff
 			// once we gossip the whole block there's nothing left to send until next height or round
 			Priority:            10,
@@ -173,7 +173,7 @@ func (*Reactor) StreamDescriptors() []abstract.StreamDescriptor {
 			RecvMessageCapacity: maxMsgSize,
 			MessageTypeI:        &cmtcons.Message{},
 		},
-		&tcpconn.ChannelDescriptor{
+		tcpconn.ChannelDescriptor{
 			ID:                  VoteChannel,
 			Priority:            7,
 			SendQueueCapacity:   100,
@@ -181,7 +181,7 @@ func (*Reactor) StreamDescriptors() []abstract.StreamDescriptor {
 			RecvMessageCapacity: maxMsgSize,
 			MessageTypeI:        &cmtcons.Message{},
 		},
-		&tcpconn.ChannelDescriptor{
+		tcpconn.ChannelDescriptor{
 			ID:                  VoteSetBitsChannel,
 			Priority:            1,
 			SendQueueCapacity:   2,

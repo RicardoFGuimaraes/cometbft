@@ -104,24 +104,24 @@ func initSwitchFunc(_ int, sw *Switch) *Switch {
 
 	// Make two reactors of two channels each
 	sw.AddReactor("foo", NewTestReactor([]abstract.StreamDescriptor{
-		&tcpconn.ChannelDescriptor{
+		tcpconn.ChannelDescriptor{
 			ID:           byte(0x00),
 			Priority:     1,
 			MessageTypeI: &p2pproto.Message{},
 		},
-		&tcpconn.ChannelDescriptor{
+		tcpconn.ChannelDescriptor{
 			ID:           byte(0x01),
 			Priority:     2,
 			MessageTypeI: &p2pproto.Message{},
 		},
 	}, true))
 	sw.AddReactor("bar", NewTestReactor([]abstract.StreamDescriptor{
-		&tcpconn.ChannelDescriptor{
+		tcpconn.ChannelDescriptor{
 			ID:           byte(0x02),
 			Priority:     3,
 			MessageTypeI: &p2pproto.Message{},
 		},
-		&tcpconn.ChannelDescriptor{
+		tcpconn.ChannelDescriptor{
 			ID:           byte(0x03),
 			Priority:     4,
 			MessageTypeI: &p2pproto.Message{},

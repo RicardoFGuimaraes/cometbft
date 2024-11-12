@@ -67,14 +67,14 @@ func NewReactor(
 // StreamDescriptors implements p2p.Reactor.
 func (*Reactor) StreamDescriptors() []abstract.StreamDescriptor {
 	return []abstract.StreamDescriptor{
-		&tcpconn.ChannelDescriptor{
+		tcpconn.ChannelDescriptor{
 			ID:                  SnapshotChannel,
 			Priority:            5,
 			SendQueueCapacity:   10,
 			RecvMessageCapacity: snapshotMsgSize,
 			MessageTypeI:        &ssproto.Message{},
 		},
-		&tcpconn.ChannelDescriptor{
+		tcpconn.ChannelDescriptor{
 			ID:                  ChunkChannel,
 			Priority:            3,
 			SendQueueCapacity:   10,
