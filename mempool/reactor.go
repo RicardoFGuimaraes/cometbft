@@ -83,7 +83,7 @@ func (memR *Reactor) StreamDescriptors() []abstract.StreamDescriptor {
 	}
 
 	return []abstract.StreamDescriptor{
-		&tcpconn.ChannelDescriptor{
+		tcpconn.ChannelDescriptor{
 			ID:                  MempoolChannel,
 			Priority:            5,
 			RecvMessageCapacity: batchMsg.Size(),
