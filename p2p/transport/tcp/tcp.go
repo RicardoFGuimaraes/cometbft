@@ -35,13 +35,6 @@ type accept struct {
 	err     error
 }
 
-// transportLifecycle bundles the methods for callers to control start and stop
-// behavior.
-type transportLifecycle interface {
-	Close() error
-	Listen(addr na.NetAddr) error
-}
-
 // ConnFilterFunc to be implemented by filter hooks after a new connection has
 // been established. The set of existing connections is passed along together
 // with all resolved IPs for the new connection.
@@ -124,7 +117,6 @@ type MultiplexTransport struct {
 
 // Test multiplexTransport for interface completeness.
 var (
-	_ transportLifecycle = (*MultiplexTransport)(nil)
 	_ abstract.Transport = (*MultiplexTransport)(nil)
 )
 
@@ -191,7 +183,6 @@ func (mt *MultiplexTransport) Dial(addr na.NetAddr) (abstract.Connection, error)
 	return mconn, mconn.Start()
 }
 
-// Close implements transportLifecycle.
 func (mt *MultiplexTransport) Close() error {
 	close(mt.closec)
 
@@ -202,7 +193,6 @@ func (mt *MultiplexTransport) Close() error {
 	return nil
 }
 
-// Listen implements transportLifecycle.
 func (mt *MultiplexTransport) Listen(addr na.NetAddr) error {
 	ln, err := net.Listen("tcp", addr.DialString())
 	if err != nil {
