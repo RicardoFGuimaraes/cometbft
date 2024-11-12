@@ -48,28 +48,23 @@ const (
 	maxRecvChanCap = 100
 )
 
-/*
-TODO: rewrite
-Each peer has one `MConnection` (multiplex connection) instance.
-
-__multiplex__ *noun* a system or signal involving simultaneous transmission of
-several messages along a single channel of communication.
-
-Each `MConnection` handles message transmission on multiple abstract communication
-`Channel`s.  Each channel has a globally unique byte id.
-The byte id and the relative priorities of each `Channel` are configured upon
-initialization of the connection.
-
-There are two methods for sending messages:
-
-	func (m MConnection) Send(chID byte, msgBytes []byte) bool {}
-
-`Send(chID, msgBytes)` is a blocking call that waits until `msg` is
-successfully queued for the channel with the given id byte `chID`, or until the
-request times out.  The message `msg` is serialized using Protobuf.
-
-Inbound message bytes are handled with an onReceive callback function.
-*/
+// MConnection is a multiplexed connection.
+//
+// __multiplex__ *noun* a system or signal involving simultaneous transmission
+// of several messages along a single channel of communication.
+//
+// Each connection handles message transmission on multiple abstract
+// communication streams. Each stream has a globally unique byte id. The byte
+// id and the relative priorities of each stream are configured upon
+// initialization of the connection.
+//
+// To open a stream, call OpenStream with the stream id. Remember that the
+// stream id must be globally unique.
+//
+// Connection errors are communicated through the ErrorCh channel.
+//
+// Connection can be closed either by calling Close or FlushAndClose. The
+// latter will flush all pending messages before closing the connection.
 type MConnection struct {
 	service.BaseService
 
