@@ -20,23 +20,22 @@ const testCh = 0x01
 
 // ------------------------------------------------
 
-type nopStream struct {
-}
+type nopStream struct{}
 
-func (s nopStream) Read(b []byte) (n int, err error) {
+func (nopStream) Read([]byte) (n int, err error) {
 	return 0, nil
 }
 
-func (s nopStream) Write(b []byte) (n int, err error) {
+func (nopStream) Write(b []byte) (n int, err error) {
 	return len(b), nil
 }
 
 func (nopStream) Close() error {
 	return nil
 }
-func (s nopStream) SetDeadline(t time.Time) error      { return nil }
-func (s nopStream) SetReadDeadline(t time.Time) error  { return nil }
-func (s nopStream) SetWriteDeadline(t time.Time) error { return nil }
+func (nopStream) SetDeadline(time.Time) error      { return nil }
+func (nopStream) SetReadDeadline(time.Time) error  { return nil }
+func (nopStream) SetWriteDeadline(time.Time) error { return nil }
 
 func AddPeerToSwitchPeerSet(sw *Switch, peer Peer) {
 	sw.peers.Add(peer) //nolint:errcheck // ignore error

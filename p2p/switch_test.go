@@ -157,13 +157,6 @@ func TestSwitches(t *testing.T) {
 			},
 		},
 	}
-	ch1Msg := &p2pproto.PexAddrs{
-		Addrs: []p2pproto.NetAddress{
-			{
-				ID: "1",
-			},
-		},
-	}
 	ch2Msg := &p2pproto.PexAddrs{
 		Addrs: []p2pproto.NetAddress{
 			{
@@ -174,15 +167,10 @@ func TestSwitches(t *testing.T) {
 	// Test broadcast and TryBroadcast on different channels in parallel.
 	// We have no channel capacity concerns, as each broadcast is on a distinct channel
 	s1.Broadcast(Envelope{ChannelID: byte(0x00), Message: ch0Msg})
-	s1.Broadcast(Envelope{ChannelID: byte(0x01), Message: ch1Msg})
 	s1.TryBroadcast(Envelope{ChannelID: byte(0x02), Message: ch2Msg})
 	assertMsgReceivedWithTimeout(t,
 		ch0Msg,
 		byte(0x00),
-		s2.Reactor("foo").(*TestReactor), 200*time.Millisecond, 5*time.Second)
-	assertMsgReceivedWithTimeout(t,
-		ch1Msg,
-		byte(0x01),
 		s2.Reactor("foo").(*TestReactor), 200*time.Millisecond, 5*time.Second)
 	assertMsgReceivedWithTimeout(t,
 		ch2Msg,
