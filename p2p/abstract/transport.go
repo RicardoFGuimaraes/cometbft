@@ -26,6 +26,7 @@ type Transport interface {
 	// is added or an old one gets removed.
 	//
 	// See StreamDescriptor
+	// Warning: This API should not be considered stable and might change soon.
 	UpdateStreamDescriptors(descs []StreamDescriptor)
 }
 

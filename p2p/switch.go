@@ -633,6 +633,7 @@ func (sw *Switch) acceptRoutine() {
 			case tcp.ErrRejected:
 				sw.Logger.Info(
 					"Inbound Peer rejected",
+					"peer", addr,
 					"err", err,
 					"numPeers", sw.peers.Size(),
 				)
@@ -641,20 +642,17 @@ func (sw *Switch) acceptRoutine() {
 			case tcp.ErrFilterTimeout:
 				sw.Logger.Error(
 					"Peer filter timed out",
+					"peer", addr,
 					"err", err,
 				)
 
 				continue
 			case tcp.ErrTransportClosed:
-				sw.Logger.Error(
-					"Stopped accept routine, as transport is closed",
-					"numPeers", sw.peers.Size(),
-				)
+				sw.Logger.Error("Stopped accept routine, as transport is closed")
 			default:
 				sw.Logger.Error(
 					"Accept on transport errored",
 					"err", err,
-					"numPeers", sw.peers.Size(),
 				)
 				// We could instead have a retry loop around the acceptRoutine,
 				// but that would need to stop and let the node shutdown eventually.
@@ -689,6 +687,7 @@ func (sw *Switch) acceptRoutine() {
 
 			sw.Logger.Info(
 				"Inbound Peer rejected",
+				"peer", addr,
 				"err", errRejected,
 				"numPeers", sw.peers.Size(),
 			)
@@ -714,7 +713,7 @@ func (sw *Switch) acceptRoutine() {
 			if in >= sw.config.MaxNumInboundPeers {
 				sw.Logger.Info(
 					"Ignoring inbound connection: already have enough inbound peers",
-					"address", p.SocketAddr(),
+					"peer", addr,
 					"have", in,
 					"max", sw.config.MaxNumInboundPeers,
 				)
@@ -732,8 +731,8 @@ func (sw *Switch) acceptRoutine() {
 			}
 			sw.Logger.Info(
 				"Ignoring inbound connection: error while adding peer",
+				"peer", addr,
 				"err", err,
-				"id", p.ID(),
 			)
 		}
 	}
