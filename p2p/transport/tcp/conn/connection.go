@@ -95,7 +95,7 @@ type MConnection struct {
 	// Closing quitRecvRouting will cause the recvRouting to eventually quit.
 	quitRecvRoutine chan struct{}
 
-	// used to ensure FlushStop and OnStop
+	// used to ensure FlushAndClose and OnStop
 	// are safe to call concurrently.
 	stopMtx cmtsync.Mutex
 
@@ -223,7 +223,7 @@ func (c *MConnection) Conn() net.Conn {
 
 // stopServices stops the BaseService and timers and closes the quitSendRoutine.
 // if the quitSendRoutine was already closed, it returns true, otherwise it returns false.
-// It uses the stopMtx to ensure only one of FlushStop and OnStop can do this at a time.
+// It uses the stopMtx to ensure only one of FlushAndClose and OnStop can do this at a time.
 func (c *MConnection) stopServices() (alreadyStopped bool) {
 	c.stopMtx.Lock()
 	defer c.stopMtx.Unlock()
@@ -242,7 +242,6 @@ func (c *MConnection) stopServices() (alreadyStopped bool) {
 	default:
 	}
 
-	c.BaseService.OnStop()
 	c.flushTimer.Stop()
 	c.pingTimer.Stop()
 	c.chStatsTimer.Stop()
@@ -251,44 +250,6 @@ func (c *MConnection) stopServices() (alreadyStopped bool) {
 	close(c.quitRecvRoutine)
 	close(c.quitSendRoutine)
 	return false
-}
-
-// FlushStop replicates the logic of OnStop.
-// It additionally ensures that all successful
-// .Send() calls will get flushed before closing
-// the connection.
-func (c *MConnection) FlushStop() {
-	if c.stopServices() {
-		return
-	}
-
-	// this block is unique to FlushStop
-	{
-		// wait until the sendRoutine exits
-		// so we dont race on calling sendSomePacketMsgs
-		<-c.doneSendRoutine
-
-		// Send and flush all pending msgs.
-		// Since sendRoutine has exited, we can call this
-		// safely
-		w := protoio.NewDelimitedWriter(c.bufConnWriter)
-		eof := c.sendSomePacketMsgs(w)
-		for !eof {
-			eof = c.sendSomePacketMsgs(w)
-		}
-		c.flush()
-
-		// Now we can close the connection
-	}
-
-	c.conn.Close()
-
-	// We can't close pong safely here because
-	// recvRoutine may write to it after we've stopped.
-	// Though it doesn't need to get closed at all,
-	// we close it @ recvRoutine.
-
-	// c.Stop()
 }
 
 // ErrorCh returns a channel that will receive errors from the connection.
@@ -310,10 +271,6 @@ func (c *MConnection) OnStop() {
 	// we close it @ recvRoutine.
 }
 
-func (c *MConnection) Close(string) error {
-	return c.Stop()
-}
-
 func (c *MConnection) LocalAddr() net.Addr {
 	return c.conn.LocalAddr()
 }
@@ -326,9 +283,44 @@ func (c *MConnection) OpenStream(streamID byte) (abstract.Stream, error) {
 	return &MConnectionStream{conn: c, streadID: streamID}, nil
 }
 
+func (c *MConnection) Close(string) error {
+	return c.Stop()
+}
+
+// FlushAndClose replicates the logic of OnStop. It additionally ensures that
+// all successful writes will get flushed before closing the connection.
 func (c *MConnection) FlushAndClose(string) error {
-	c.FlushStop()
-	return nil
+	if c.stopServices() {
+		return nil
+	}
+
+	// this block is unique to FlushAndClose
+	{
+		// wait until the sendRoutine exits
+		// so we dont race on calling sendSomePacketMsgs
+		<-c.doneSendRoutine
+
+		// Send and flush all pending msgs.
+		// Since sendRoutine has exited, we can call this
+		// safely
+		w := protoio.NewDelimitedWriter(c.bufConnWriter)
+		eof := c.sendSomePacketMsgs(w)
+		for !eof {
+			eof = c.sendSomePacketMsgs(w)
+		}
+		c.flush()
+
+		// Now we can close the connection
+	}
+
+	// We can't close pong safely here because
+	// recvRoutine may write to it after we've stopped.
+	// Though it doesn't need to get closed at all,
+	// we close it @ recvRoutine.
+
+	// c.Stop()
+
+	return c.conn.Close()
 }
 
 func (c *MConnection) ConnectionState() any {

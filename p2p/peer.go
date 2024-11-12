@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"reflect"
+	"runtime/debug"
 	"time"
 
 	"github.com/cosmos/gogoproto/proto"
@@ -196,7 +197,7 @@ func newPeer(
 func (p *peer) readLoop() {
 	defer func() {
 		if r := recover(); r != nil {
-			p.Logger.Error("Recovered from panic", "err", r)
+			p.Logger.Error("Peer panicked", "err", r, "stack", string(debug.Stack()))
 			p.onPeerError(p, r)
 		}
 	}()
