@@ -113,8 +113,7 @@ func createOutboundPeerAndPerformHandshake(
 			},
 		}
 	)
-	p, err := newPeer(pc, peerNodeInfo, streamInfoByStreamID, func(_ Peer, _ any) {})
-	require.NoError(t, err)
+	p := newPeer(pc, peerNodeInfo, streamInfoByStreamID, func(_ Peer, _ any) {})
 	p.SetLogger(log.TestingLogger().With("peer", addr))
 	return p, nil
 }
@@ -127,7 +126,7 @@ func testDial(addr *na.NetAddr, cfg *config.P2PConfig) (abstract.Connection, err
 	if err != nil {
 		return nil, err
 	}
-	return mockConnection{conn}, nil
+	return newMockConnection(conn), nil
 }
 
 // testOutboundPeerConn dials a remote peer and returns a peerConn.
@@ -224,7 +223,7 @@ func (rp *remoteTCPPeer) accept() {
 			return
 		}
 
-		conn := mockConnection{netConn}
+		conn := newMockConnection(netConn)
 
 		pc, err := testInboundPeerConn(conn, rp.Config)
 		if err != nil {

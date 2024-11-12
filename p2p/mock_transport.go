@@ -9,30 +9,42 @@ import (
 )
 
 type mockStream struct {
-	net.Conn
+	streamID byte
+	conn     *mockConnection
 }
 
 func (s mockStream) Read(b []byte) (n int, err error) {
-	return s.Conn.Read(b)
+	return s.conn.Conn.Read(b)
 }
 
 func (s mockStream) Write(b []byte) (n int, err error) {
-	return s.Conn.Write(b)
+	return s.conn.Conn.Write(b)
 }
 
 func (mockStream) Close() error {
 	return nil
 }
-func (s mockStream) SetDeadline(t time.Time) error      { return s.Conn.SetReadDeadline(t) }
-func (s mockStream) SetReadDeadline(t time.Time) error  { return s.Conn.SetReadDeadline(t) }
-func (s mockStream) SetWriteDeadline(t time.Time) error { return s.Conn.SetWriteDeadline(t) }
+func (s mockStream) SetDeadline(t time.Time) error      { return s.conn.Conn.SetReadDeadline(t) }
+func (s mockStream) SetReadDeadline(t time.Time) error  { return s.conn.Conn.SetReadDeadline(t) }
+func (s mockStream) SetWriteDeadline(t time.Time) error { return s.conn.Conn.SetWriteDeadline(t) }
 
 type mockConnection struct {
 	net.Conn
+	connectedAt time.Time
 }
 
-func (c mockConnection) OpenStream(byte) (abstract.Stream, error) {
-	return mockStream(c), nil
+func newMockConnection(c net.Conn) *mockConnection {
+	return &mockConnection{
+		Conn:        c,
+		connectedAt: time.Now(),
+	}
+}
+
+func (c mockConnection) OpenStream(streamID byte) (abstract.Stream, error) {
+	return &mockStream{
+		conn:     &c,
+		streamID: streamID,
+	}, nil
 }
 
 func (c mockConnection) LocalAddr() net.Addr {
@@ -44,7 +56,17 @@ func (c mockConnection) RemoteAddr() net.Addr {
 }
 func (c mockConnection) Close(string) error         { return c.Conn.Close() }
 func (c mockConnection) FlushAndClose(string) error { return c.Conn.Close() }
-func (mockConnection) ConnectionState() any         { return nil }
+
+type mockStatus struct {
+	connectedFor time.Duration
+}
+
+func (s mockStatus) ConnectedFor() time.Duration { return s.connectedFor }
+func (c mockConnection) ConnectionState() any {
+	return &mockStatus{
+		connectedFor: time.Since(c.connectedAt),
+	}
+}
 
 var _ abstract.Transport = (*mockTransport)(nil)
 
@@ -69,12 +91,12 @@ func (t *mockTransport) NetAddr() na.NetAddr {
 
 func (t *mockTransport) Accept() (abstract.Connection, *na.NetAddr, error) {
 	c, err := t.ln.Accept()
-	return &mockConnection{Conn: c}, nil, err
+	return newMockConnection(c), nil, err
 }
 
 func (*mockTransport) Dial(addr na.NetAddr) (abstract.Connection, error) {
 	c, err := addr.DialTimeout(time.Second)
-	return &mockConnection{Conn: c}, err
+	return newMockConnection(c), err
 }
 
 func (*mockTransport) Cleanup(abstract.Connection) error {

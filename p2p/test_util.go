@@ -20,6 +20,24 @@ const testCh = 0x01
 
 // ------------------------------------------------
 
+type nopStream struct {
+}
+
+func (s nopStream) Read(b []byte) (n int, err error) {
+	return 0, nil
+}
+
+func (s nopStream) Write(b []byte) (n int, err error) {
+	return len(b), nil
+}
+
+func (nopStream) Close() error {
+	return nil
+}
+func (s nopStream) SetDeadline(t time.Time) error      { return nil }
+func (s nopStream) SetReadDeadline(t time.Time) error  { return nil }
+func (s nopStream) SetWriteDeadline(t time.Time) error { return nil }
+
 func AddPeerToSwitchPeerSet(sw *Switch, peer Peer) {
 	sw.peers.Add(peer) //nolint:errcheck // ignore error
 }
@@ -34,7 +52,10 @@ func CreateRandomPeer(outbound bool) Peer {
 		},
 		nodeInfo: mockNodeInfo{netAddr},
 		metrics:  NopMetrics(),
+		streams:  make(map[byte]abstract.Stream),
 	}
+	// PEX
+	p.streams[0x00] = &nopStream{}
 	p.SetLogger(log.TestingLogger().With("peer", addr))
 	return p
 }
@@ -100,14 +121,14 @@ func Connect2Switches(switches []*Switch, i, j int) {
 
 	doneCh := make(chan struct{})
 	go func() {
-		err := switchI.addPeerWithConnection(mockConnection{c1})
+		err := switchI.addPeerWithConnection(newMockConnection(c1))
 		if err != nil {
 			panic(err)
 		}
 		doneCh <- struct{}{}
 	}()
 	go func() {
-		err := switchJ.addPeerWithConnection(mockConnection{c2})
+		err := switchJ.addPeerWithConnection(newMockConnection(c2))
 		if err != nil {
 			panic(err)
 		}
@@ -133,14 +154,14 @@ func ConnectStarSwitches(c int) func([]*Switch, int, int) {
 
 		doneCh := make(chan struct{})
 		go func() {
-			err := switchI.addPeerWithConnection(mockConnection{c1})
+			err := switchI.addPeerWithConnection(newMockConnection(c1))
 			if err != nil {
 				panic(err)
 			}
 			doneCh <- struct{}{}
 		}()
 		go func() {
-			err := switchJ.addPeerWithConnection(mockConnection{c2})
+			err := switchJ.addPeerWithConnection(newMockConnection(c2))
 			if err != nil {
 				panic(err)
 			}
@@ -177,16 +198,12 @@ func (sw *Switch) addPeerWithConnection(conn abstract.Connection) error {
 		return err
 	}
 
-	p, err := newPeer(
+	p := newPeer(
 		pc,
 		ni,
 		sw.streamInfoByStreamID,
 		sw.StopPeerForError,
 	)
-	if err != nil {
-		closeConn(err)
-		return err
-	}
 
 	if err = sw.addPeer(p); err != nil {
 		closeConn(err)

@@ -696,7 +696,7 @@ func (sw *Switch) acceptRoutine() {
 			continue
 		}
 
-		p, err := wrapPeer(
+		p := wrapPeer(
 			conn,
 			nodeInfo,
 			peerConfig{
@@ -707,14 +707,6 @@ func (sw *Switch) acceptRoutine() {
 				outbound:             false,
 			},
 			addr)
-		if err != nil {
-			sw.Logger.Info(
-				"Ignoring inbound connection: error while wrapping peer",
-				"err", err,
-			)
-			_ = sw.transport.Cleanup(conn)
-			continue
-		}
 
 		if !sw.IsPeerUnconditional(p.NodeInfo().ID()) {
 			// Ignore connection if we already have enough peers.
@@ -797,7 +789,7 @@ func (sw *Switch) addOutboundPeerWithConfig(
 		return err
 	}
 
-	p, err := wrapPeer(
+	p := wrapPeer(
 		conn,
 		nodeInfo,
 		peerConfig{
@@ -808,10 +800,6 @@ func (sw *Switch) addOutboundPeerWithConfig(
 			outbound:             true,
 		},
 		addr)
-	if err != nil {
-		_ = sw.transport.Cleanup(conn)
-		return err
-	}
 
 	if err := sw.addPeer(p); err != nil {
 		_ = sw.transport.Cleanup(conn)

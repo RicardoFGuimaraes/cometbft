@@ -143,9 +143,9 @@ func TestMConnectionStatus(t *testing.T) {
 	require.NoError(t, err)
 	defer mconn.Stop() //nolint:errcheck // ignore for tests
 
-	status := mconn.Status()
-	assert.NotNil(t, status)
-	assert.Zero(t, status.Channels[0].SendQueueSize)
+	state := mconn.ConnectionState()
+	assert.NotNil(t, state)
+	assert.Zero(t, state.(ConnectionStatus).Channels[0].SendQueueSize)
 }
 
 func TestMConnection_PongTimeoutResultsInError(t *testing.T) {

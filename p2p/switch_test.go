@@ -285,7 +285,7 @@ func TestSwitchPeerFilter(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	p, err := wrapPeer(conn,
+	p := wrapPeer(conn,
 		rp.nodeInfo(),
 		peerConfig{
 			onPeerError:          sw.StopPeerForError,
@@ -295,7 +295,6 @@ func TestSwitchPeerFilter(t *testing.T) {
 			outbound:             true,
 		},
 		rp.Addr())
-	require.NoError(t, err)
 
 	err = sw.addPeer(p)
 	if err, ok := err.(ErrRejected); ok {
@@ -341,7 +340,7 @@ func TestSwitchPeerFilterTimeout(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	p, err := wrapPeer(conn,
+	p := wrapPeer(conn,
 		rp.nodeInfo(),
 		peerConfig{
 			onPeerError:          sw.StopPeerForError,
@@ -351,7 +350,6 @@ func TestSwitchPeerFilterTimeout(t *testing.T) {
 			outbound:             true,
 		},
 		rp.Addr())
-	require.NoError(t, err)
 
 	err = sw.addPeer(p)
 	if _, ok := err.(tcp.ErrFilterTimeout); !ok {
@@ -379,7 +377,7 @@ func TestSwitchPeerFilterDuplicate(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	p, err := wrapPeer(conn,
+	p := wrapPeer(conn,
 		rp.nodeInfo(),
 		peerConfig{
 			onPeerError:          sw.StopPeerForError,
@@ -389,7 +387,6 @@ func TestSwitchPeerFilterDuplicate(t *testing.T) {
 			outbound:             true,
 		},
 		rp.Addr())
-	require.NoError(t, err)
 
 	if err := sw.addPeer(p); err != nil {
 		t.Fatal(err)
@@ -435,7 +432,7 @@ func TestSwitchStopsNonPersistentPeerOnError(t *testing.T) {
 	conn, err := sw.transport.Dial(*rp.Addr())
 	require.NoError(err)
 
-	p, err := wrapPeer(conn,
+	p := wrapPeer(conn,
 		rp.nodeInfo(),
 		peerConfig{
 			onPeerError:          sw.StopPeerForError,
@@ -445,7 +442,6 @@ func TestSwitchStopsNonPersistentPeerOnError(t *testing.T) {
 			outbound:             true,
 		},
 		rp.Addr())
-	require.NoError(err)
 
 	err = sw.addPeer(p)
 	require.NoError(err)

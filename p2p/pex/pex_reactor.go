@@ -731,6 +731,7 @@ func (r *Reactor) cleanupCrawlPeerInfos() {
 	}
 }
 
+// Connection status interface for peers.
 type durationStatus interface {
 	ConnectedFor() time.Duration
 }

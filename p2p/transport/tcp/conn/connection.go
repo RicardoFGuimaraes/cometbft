@@ -332,7 +332,21 @@ func (c *MConnection) FlushAndClose(string) error {
 }
 
 func (c *MConnection) ConnectionState() any {
-	return c.Status()
+	var status ConnectionStatus
+	status.Duration = time.Since(c.created)
+	status.SendMonitor = c.sendMonitor.Status()
+	status.RecvMonitor = c.recvMonitor.Status()
+	status.Channels = make([]ChannelStatus, len(c.channels))
+	for i, channel := range c.channels {
+		status.Channels[i] = ChannelStatus{
+			ID:                channel.desc.ID,
+			SendQueueCapacity: cap(channel.sendQueue),
+			SendQueueSize:     int(atomic.LoadInt32(&channel.sendQueueSize)),
+			Priority:          channel.desc.Priority,
+			RecentlySent:      atomic.LoadInt64(&channel.recentlySent),
+		}
+	}
+	return status
 }
 
 func (c *MConnection) String() string {
@@ -704,43 +718,6 @@ func (c *MConnection) maxPacketMsgSize() int {
 		panic(err)
 	}
 	return len(bz)
-}
-
-type ConnectionStatus struct {
-	Duration    time.Duration
-	SendMonitor flow.Status
-	RecvMonitor flow.Status
-	Channels    []ChannelStatus
-}
-
-func (cs ConnectionStatus) ConnectedFor() time.Duration {
-	return cs.Duration
-}
-
-type ChannelStatus struct {
-	ID                byte
-	SendQueueCapacity int
-	SendQueueSize     int
-	Priority          int
-	RecentlySent      int64
-}
-
-func (c *MConnection) Status() ConnectionStatus {
-	var status ConnectionStatus
-	status.Duration = time.Since(c.created)
-	status.SendMonitor = c.sendMonitor.Status()
-	status.RecvMonitor = c.recvMonitor.Status()
-	status.Channels = make([]ChannelStatus, len(c.channels))
-	for i, channel := range c.channels {
-		status.Channels[i] = ChannelStatus{
-			ID:                channel.desc.ID,
-			SendQueueCapacity: cap(channel.sendQueue),
-			SendQueueSize:     int(atomic.LoadInt32(&channel.sendQueueSize)),
-			Priority:          channel.desc.Priority,
-			RecentlySent:      atomic.LoadInt64(&channel.recentlySent),
-		}
-	}
-	return status
 }
 
 // -----------------------------------------------------------------------------

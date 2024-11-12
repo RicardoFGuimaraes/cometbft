@@ -1,7 +1,9 @@
 package p2p
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"net"
 	"reflect"
 	"time"
@@ -126,6 +128,10 @@ func (pc peerConn) RemoteIP() net.IP {
 	return pc.ip
 }
 
+func (pc peerConn) String() string {
+	return pc.socketAddr.String()
+}
+
 // peer implements Peer.
 //
 // Before using a peer, you will need to perform a handshake on connection.
@@ -149,6 +155,9 @@ type peer struct {
 
 	// When removal of a peer fails, we set this flag
 	removalAttemptFailed bool
+
+	streamInfoByStreamID map[byte]streamInfo
+	onPeerError          func(Peer, any)
 }
 
 type PeerOption func(*peer)
@@ -164,37 +173,34 @@ func newPeer(
 	streamInfoByStreamID map[byte]streamInfo,
 	onPeerError func(Peer, any),
 	options ...PeerOption,
-) (*peer, error) {
+) *peer {
 	p := &peer{
-		peerConn:       pc,
-		nodeInfo:       nodeInfo,
-		channels:       nodeInfo.(ni.Default).Channels,
-		Data:           cmap.NewCMap(),
-		metrics:        NopMetrics(),
-		pendingMetrics: newPeerPendingMetricsCache(),
+		peerConn:             pc,
+		nodeInfo:             nodeInfo,
+		channels:             nodeInfo.(ni.Default).Channels,
+		Data:                 cmap.NewCMap(),
+		metrics:              NopMetrics(),
+		pendingMetrics:       newPeerPendingMetricsCache(),
+		streamInfoByStreamID: streamInfoByStreamID,
+		onPeerError:          onPeerError,
 	}
-
-	// Open streams for all reactors.
-	p.streams = make(map[byte]abstract.Stream)
-	for streamID := range streamInfoByStreamID {
-		stream, err := p.peerConn.OpenStream(streamID)
-		if err != nil {
-			return nil, fmt.Errorf("opening stream %v: %w", streamID, err)
-		}
-		p.streams[streamID] = stream
-	}
-
-	go p.readLoop(streamInfoByStreamID, onPeerError)
 
 	p.BaseService = *service.NewBaseService(nil, "Peer", p)
 	for _, option := range options {
 		option(p)
 	}
 
-	return p, nil
+	return p
 }
 
-func (p *peer) readLoop(streamInfoByStreamID map[byte]streamInfo, onPeerError func(Peer, any)) {
+func (p *peer) readLoop() {
+	defer func() {
+		if r := recover(); r != nil {
+			p.Logger.Error("Recovered from panic", "err", r)
+			p.onPeerError(p, r)
+		}
+	}()
+
 	for {
 		select {
 		case <-p.Quit():
@@ -204,21 +210,21 @@ func (p *peer) readLoop(streamInfoByStreamID map[byte]streamInfo, onPeerError fu
 			for streamID, stream := range p.streams {
 				buf := make([]byte, 1024) // TODO max msg size for this stream
 				n, err := stream.Read(buf)
-				if err != nil {
-					p.Logger.Error("Error reading from stream", "stream", streamID, "err", err)
-					onPeerError(p, err)
-					return
-				}
-				if n == 0 {
+				if (n == 0 && err == nil) || errors.Is(err, io.EOF) {
 					continue
 				}
+				if err != nil {
+					p.Logger.Error("Error reading from stream", "stream", streamID, "err", err)
+					p.onPeerError(p, err)
+					return
+				}
 
-				msgType := streamInfoByStreamID[streamID].msgType
+				msgType := p.streamInfoByStreamID[streamID].msgType
 				msg := proto.Clone(msgType)
 				err = proto.Unmarshal(buf[:n], msg)
 				if err != nil {
 					p.Logger.Error("Error unmarshaling message", "as", reflect.TypeOf(msgType), "err", err)
-					onPeerError(p, err)
+					p.onPeerError(p, err)
 					return
 				}
 
@@ -226,13 +232,14 @@ func (p *peer) readLoop(streamInfoByStreamID map[byte]streamInfo, onPeerError fu
 					msg, err = w.Unwrap()
 					if err != nil {
 						p.Logger.Error("Error uwrapping message", "err", err)
-						onPeerError(p, err)
+						p.onPeerError(p, err)
 						return
 					}
 				}
 
+				p.Logger.Debug("Received message", "stream", streamID, "msg", msg)
 				p.pendingMetrics.AddPendingRecvBytes(getMsgType(msg), n)
-				reactor := streamInfoByStreamID[streamID].reactor
+				reactor := p.streamInfoByStreamID[streamID].reactor
 				reactor.Receive(Envelope{
 					ChannelID: streamID,
 					Src:       p,
@@ -246,10 +253,10 @@ func (p *peer) readLoop(streamInfoByStreamID map[byte]streamInfo, onPeerError fu
 // String representation.
 func (p *peer) String() string {
 	if p.outbound {
-		return fmt.Sprintf("Peer{%v %v out}", p.peerConn, p.ID())
+		return fmt.Sprintf("Peer{%v out}", p.peerConn)
 	}
 
-	return fmt.Sprintf("Peer{%v %v in}", p.peerConn, p.ID())
+	return fmt.Sprintf("Peer{%v in}", p.peerConn)
 }
 
 // ---------------------------------------------------
@@ -263,15 +270,19 @@ func (p *peer) SetLogger(l log.Logger) {
 
 // OnStart implements BaseService.
 func (p *peer) OnStart() error {
-	if err := p.BaseService.OnStart(); err != nil {
-		return err
+	// Open streams for all reactors.
+	p.streams = make(map[byte]abstract.Stream)
+	for streamID := range p.streamInfoByStreamID {
+		stream, err := p.peerConn.OpenStream(streamID)
+		if err != nil {
+			return fmt.Errorf("opening stream %v: %w", streamID, err)
+		}
+		p.streams[streamID] = stream
 	}
 
-	// if err := p.mconn.Start(); err != nil {
-	// 	return err
-	// }
-
+	go p.readLoop()
 	go p.metricsReporter()
+
 	return nil
 }
 
@@ -498,7 +509,7 @@ func (p *peer) metricsReporter() {
 // ------------------------------------------------------------------
 // helper funcs
 
-func wrapPeer(c abstract.Connection, ni ni.NodeInfo, cfg peerConfig, socketAddr *na.NetAddr) (Peer, error) {
+func wrapPeer(c abstract.Connection, ni ni.NodeInfo, cfg peerConfig, socketAddr *na.NetAddr) Peer {
 	persistent := false
 	if cfg.isPersistent != nil {
 		if cfg.outbound {
