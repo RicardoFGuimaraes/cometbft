@@ -134,6 +134,7 @@ func NewMultiplexTransport(nodeKey nodekey.NodeKey, mConfig conn.MConnConfig) *M
 		nodeKey:          nodeKey,
 		conns:            NewConnSet(),
 		resolver:         net.DefaultResolver,
+		logger:           log.NewNopLogger(),
 	}
 }
 
@@ -156,8 +157,6 @@ func (mt *MultiplexTransport) Accept() (abstract.Connection, *na.NetAddr, error)
 		if a.err != nil {
 			return nil, nil, a.err
 		}
-
-		// cfg.outbound = false
 
 		return a.conn, a.netAddr, nil
 	case <-mt.closec:
