@@ -10,7 +10,9 @@ var (
 	ErrInvalidSecretConnKeyRecv = errors.New("invalid receive SecretConnection Key")
 	ErrChallengeVerification    = errors.New("challenge verification failed")
 
-	ErrTimeout    = errors.New("read/write timeout")
+	// ErrTimeout is returned when a read or write operation times out.
+	ErrTimeout = errors.New("read/write timeout")
+	// ErrNotRunning is returned when a connection is not running.
 	ErrNotRunning = errors.New("connection is stopped")
 )
 
