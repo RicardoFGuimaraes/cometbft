@@ -9,6 +9,7 @@ import (
 	"golang.org/x/net/netutil"
 
 	"github.com/cometbft/cometbft/crypto"
+	"github.com/cometbft/cometbft/libs/log"
 	"github.com/cometbft/cometbft/p2p/abstract"
 	"github.com/cometbft/cometbft/p2p/internal/fuzz"
 	na "github.com/cometbft/cometbft/p2p/netaddr"
@@ -113,6 +114,7 @@ type MultiplexTransport struct {
 	// peer currently. All relevant configuration should be refactored into options
 	// with sane defaults.
 	mConfig *conn.MConnConfig
+	logger  log.Logger
 }
 
 // Test multiplexTransport for interface completeness.
@@ -133,6 +135,11 @@ func NewMultiplexTransport(nodeKey nodekey.NodeKey, mConfig conn.MConnConfig) *M
 		conns:            NewConnSet(),
 		resolver:         net.DefaultResolver,
 	}
+}
+
+// SetLogger sets the logger for the transport.
+func (mt *MultiplexTransport) SetLogger(l log.Logger) {
+	mt.logger = l
 }
 
 // NetAddr implements Transport.
@@ -179,6 +186,7 @@ func (mt *MultiplexTransport) Dial(addr na.NetAddr) (abstract.Connection, error)
 	if err != nil {
 		return nil, err
 	}
+	mconn.SetLogger(mt.logger.With("remote", addr))
 
 	return mconn, mconn.Start()
 }
@@ -277,6 +285,7 @@ func (mt *MultiplexTransport) acceptPeers() {
 					addr := c.RemoteAddr()
 					id := nodekey.PubKeyToID(remotePubKey)
 					netAddr = na.New(id, addr)
+					mconn.SetLogger(mt.logger.With("remote", netAddr))
 					err = mconn.Start()
 				}
 			}

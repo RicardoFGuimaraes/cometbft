@@ -266,7 +266,6 @@ func (p *peer) String() string {
 // SetLogger implements BaseService.
 func (p *peer) SetLogger(l log.Logger) {
 	p.Logger = l
-	// p.mconn.SetLogger(l)
 }
 
 // OnStart implements BaseService.
@@ -340,8 +339,8 @@ func (p *peer) Status() any {
 	return p.ConnectionState()
 }
 
-// Send msg bytes to the channel identified by chID byte. Returns false if the
-// send queue is full after timeout, specified by MConnection.
+// Send sends the given envelope via the stream identified by e.ChannelID.
+// Returns false if the send queue is full after 10s.
 //
 // thread safe.
 func (p *peer) Send(e Envelope) bool {
@@ -354,8 +353,8 @@ func (p *peer) Send(e Envelope) bool {
 	return p.send(e.ChannelID, e.Message, stream.Write)
 }
 
-// TrySend msg bytes to the channel identified by chID byte. Immediately returns
-// false if the send queue is full.
+// TrySend tries to send the given envelope the stream identified by e.ChannelID.
+// Returns false if the send queue is full after 100ms.
 //
 // thread safe.
 func (p *peer) TrySend(e Envelope) bool {
