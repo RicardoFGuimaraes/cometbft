@@ -39,7 +39,7 @@ func createMConnectionWithSingleStream(t *testing.T, conn net.Conn) (*MConnectio
 }
 
 func TestMConnection_FlushStop(t *testing.T) {
-	server, client := NetPipe()
+	server, client := net.Pipe()
 	defer server.Close()
 	defer client.Close()
 
@@ -78,7 +78,7 @@ func TestMConnection_FlushStop(t *testing.T) {
 }
 
 func TestMConnection_StreamWrite(t *testing.T) {
-	server, client := NetPipe()
+	server, client := net.Pipe()
 	defer server.Close()
 	defer client.Close()
 
@@ -106,7 +106,7 @@ func TestMConnection_StreamWrite(t *testing.T) {
 }
 
 func TestMConnection_StreamReadWrite(t *testing.T) {
-	server, client := NetPipe()
+	server, client := net.Pipe()
 	defer server.Close()
 	defer client.Close()
 
@@ -134,7 +134,7 @@ func TestMConnection_StreamReadWrite(t *testing.T) {
 }
 
 func TestMConnectionStatus(t *testing.T) {
-	server, client := NetPipe()
+	server, client := net.Pipe()
 	defer server.Close()
 	defer client.Close()
 
@@ -312,7 +312,7 @@ func TestMConnection_PingPongs(t *testing.T) {
 }
 
 func TestMConnection_StopsAndReturnsError(t *testing.T) {
-	server, client := NetPipe()
+	server, client := net.Pipe()
 	defer server.Close()
 	defer client.Close()
 
@@ -337,7 +337,7 @@ func TestMConnection_StopsAndReturnsError(t *testing.T) {
 //nolint:unparam
 func newClientAndServerConnsForReadErrors(t *testing.T) (*MConnection, *MConnectionStream, *MConnection, *MConnectionStream) {
 	t.Helper()
-	server, client := NetPipe()
+	server, client := net.Pipe()
 
 	// create client conn with two channels
 	cfg := DefaultMConnConfig()

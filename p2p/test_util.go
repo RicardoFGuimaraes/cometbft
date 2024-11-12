@@ -13,7 +13,6 @@ import (
 	na "github.com/cometbft/cometbft/p2p/netaddr"
 	ni "github.com/cometbft/cometbft/p2p/nodeinfo"
 	"github.com/cometbft/cometbft/p2p/nodekey"
-	"github.com/cometbft/cometbft/p2p/transport/tcp/conn"
 )
 
 const testCh = 0x01
@@ -116,7 +115,7 @@ func Connect2Switches(switches []*Switch, i, j int) {
 	switchI := switches[i]
 	switchJ := switches[j]
 
-	c1, c2 := conn.NetPipe()
+	c1, c2 := net.Pipe()
 
 	doneCh := make(chan struct{})
 	go func() {
@@ -149,7 +148,7 @@ func ConnectStarSwitches(c int) func([]*Switch, int, int) {
 		switchI := switches[i]
 		switchJ := switches[j]
 
-		c1, c2 := conn.NetPipe()
+		c1, c2 := net.Pipe()
 
 		doneCh := make(chan struct{})
 		go func() {
