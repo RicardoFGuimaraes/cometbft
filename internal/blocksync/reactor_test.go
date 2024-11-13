@@ -287,6 +287,8 @@ func TestBadBlockStopsPeer(t *testing.T) {
 		}
 	}()
 
+	attempts := 0
+	const maxAttempts = 60
 	for {
 		time.Sleep(1 * time.Second)
 		caughtUp := true
@@ -297,6 +299,10 @@ func TestBadBlockStopsPeer(t *testing.T) {
 		}
 		if caughtUp {
 			break
+		}
+		attempts++
+		if attempts > maxAttempts {
+			t.Fatalf("timeout: reactors didn't catch up")
 		}
 	}
 
@@ -319,6 +325,7 @@ func TestBadBlockStopsPeer(t *testing.T) {
 		p2p.Connect2Switches(switches, i, len(reactorPairs)-1)
 	}
 
+	attempts = 0
 	for {
 		isCaughtUp, _, _ := lastReactorPair.reactor.pool.IsCaughtUp()
 		if isCaughtUp || lastReactorPair.reactor.Switch.Peers().Size() == 0 {
@@ -326,6 +333,10 @@ func TestBadBlockStopsPeer(t *testing.T) {
 		}
 
 		time.Sleep(1 * time.Second)
+		attempts++
+		if attempts > maxAttempts {
+			t.Fatalf("timeout: reactors didn't catch up")
+		}
 	}
 
 	assert.Less(t, lastReactorPair.reactor.Switch.Peers().Size(), len(reactorPairs)-1)

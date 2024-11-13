@@ -720,9 +720,13 @@ func (c *MConnection) pushRecvMsg(streamID byte, msgBytes []byte) error {
 		return fmt.Errorf("unknown stream %X", streamID)
 	}
 
+	// Make a copy to avoid a DATA RACE.
+	msgCopy := make([]byte, len(msgBytes))
+	copy(msgCopy, msgBytes)
+
 	// Push the message.
 	select {
-	case ch <- msgBytes:
+	case ch <- msgCopy:
 		return nil
 	default: // Drop the message if the buffer is full.
 		return fmt.Errorf("receive buffer is full for stream %X", streamID)
