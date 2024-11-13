@@ -44,8 +44,7 @@ func CreateRandomPeer(outbound bool) Peer {
 	addr, netAddr := na.CreateRoutableAddr()
 	p := &peer{
 		peerConn: peerConn{
-			outbound: outbound,
-			// Connection: &conn.MConnection{},
+			outbound:   outbound,
 			socketAddr: netAddr,
 		},
 		nodeInfo: mockNodeInfo{netAddr},
@@ -207,7 +206,7 @@ func (sw *Switch) addPeerWithConnection(conn abstract.Connection) error {
 		return err
 	}
 
-	stream, err := conn.OpenStream(abstract.HandshakeStreamID, nil)
+	stream, err := conn.OpenStream(HandshakeStreamID, nil)
 	if err != nil {
 		closeConn(err)
 		return err

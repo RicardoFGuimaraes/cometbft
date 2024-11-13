@@ -72,7 +72,11 @@ func (s *MConnectionStream) Write(b []byte) (n int, err error) {
 }
 
 // Close does nothing.
-func (MConnectionStream) Close() error {
+func (s *MConnectionStream) Close() error {
+	s.conn.mtx.Lock()
+	delete(s.conn.recvMsgsByStreamID, s.streadID)
+	delete(s.conn.channelsIdx, s.streadID)
+	s.conn.mtx.Unlock()
 	return nil
 }
 

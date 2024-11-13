@@ -11,6 +11,12 @@ import (
 	"github.com/cometbft/cometbft/p2p/nodekey"
 )
 
+const (
+	// HandshakeStreamID is the stream ID for the handshake stream.
+	// This stream can be reused by any reactor.
+	HandshakeStreamID byte = 0x00
+)
+
 type HandshakeStream interface {
 	SetDeadline(t time.Time) error
 	io.ReadWriter

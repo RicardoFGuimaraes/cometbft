@@ -86,7 +86,7 @@ func createOutboundPeerAndPerformHandshake(
 	pc, err := testOutboundPeerConn(addr, config, false)
 	require.NoError(t, err)
 
-	stream, err := pc.OpenStream(abstract.HandshakeStreamID, nil)
+	stream, err := pc.OpenStream(HandshakeStreamID, nil)
 	require.NoError(t, err)
 	defer stream.Close()
 
@@ -148,7 +148,7 @@ func testOutboundPeerConn(addr *na.NetAddr, config *config.P2PConfig, persistent
 	}
 
 	if addr.ID != pc.ID() { // ensure dialed ID matches connection ID
-		_ = conn.Close(err.Error())
+		_ = conn.Close("dialed ID does not match connection ID")
 		return pc, ErrSwitchAuthenticationFailure{addr, pc.ID()}
 	}
 

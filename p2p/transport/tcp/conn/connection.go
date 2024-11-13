@@ -76,7 +76,6 @@ type MConnection struct {
 	recvMonitor   *flow.Monitor
 	send          chan struct{}
 	pong          chan struct{}
-	channelsIdx   map[byte]*Channel
 	errorCh       chan error
 	config        MConnConfig
 
@@ -106,8 +105,10 @@ type MConnection struct {
 	_maxPacketMsgSize int
 
 	mtx sync.RWMutex
-	// streamID -> list of messages
+	// streamID -> list of incoming messages
 	recvMsgsByStreamID map[byte]chan []byte
+	// streamID -> channel
+	channelsIdx map[byte]*Channel
 }
 
 var _ abstract.Connection = (*MConnection)(nil)
@@ -160,10 +161,10 @@ func NewMConnection(conn net.Conn, config MConnConfig) *MConnection {
 		recvMonitor:        flow.New(0, 0),
 		send:               make(chan struct{}, 1),
 		pong:               make(chan struct{}, 1),
-		recvMsgsByStreamID: make(map[byte]chan []byte),
 		errorCh:            make(chan error, 1),
 		config:             config,
 		created:            time.Now(),
+		recvMsgsByStreamID: make(map[byte]chan []byte),
 		channelsIdx:        make(map[byte]*Channel),
 	}
 
@@ -262,7 +263,9 @@ func (c *MConnection) RemoteAddr() net.Addr {
 }
 
 func (c *MConnection) OpenStream(streamID byte, desc any) (abstract.Stream, error) {
+	c.mtx.Lock()
 	if _, ok := c.channelsIdx[streamID]; ok {
+		c.mtx.Unlock()
 		return nil, fmt.Errorf("stream %X already exists", streamID)
 	}
 
@@ -276,7 +279,6 @@ func (c *MConnection) OpenStream(streamID byte, desc any) (abstract.Stream, erro
 	c.channelsIdx[streamID] = newChannel(c, d)
 	c.channelsIdx[streamID].SetLogger(c.Logger.With("streamID", streamID))
 
-	c.mtx.Lock()
 	c.recvMsgsByStreamID[streamID] = make(chan []byte, maxRecvChanCap)
 	c.mtx.Unlock()
 
@@ -328,6 +330,7 @@ func (c *MConnection) ConnectionState() any {
 	status.Duration = time.Since(c.created)
 	status.SendMonitor = c.sendMonitor.Status()
 	status.RecvMonitor = c.recvMonitor.Status()
+	c.mtx.RLock()
 	status.Channels = make([]ChannelStatus, len(c.channelsIdx))
 	i := 0
 	for _, channel := range c.channelsIdx {
@@ -340,6 +343,7 @@ func (c *MConnection) ConnectionState() any {
 		}
 		i++
 	}
+	c.mtx.RUnlock()
 	return status
 }
 
@@ -373,6 +377,7 @@ func (c *MConnection) stopForError(r error) {
 	}
 }
 
+// thread-safe
 func (c *MConnection) sendBytes(chID byte, msgBytes []byte, timeout time.Duration) error {
 	if !c.IsRunning() {
 		return ErrNotRunning
@@ -383,7 +388,9 @@ func (c *MConnection) sendBytes(chID byte, msgBytes []byte, timeout time.Duratio
 		"msgBytes", log.NewLazySprintf("%X", msgBytes),
 		"timeout", timeout)
 
+	c.mtx.RLock()
 	channel, ok := c.channelsIdx[chID]
+	c.mtx.RUnlock()
 	if !ok {
 		panic(fmt.Sprintf("Unknown channel %X. Forgot to register?", chID))
 	}
@@ -402,12 +409,16 @@ func (c *MConnection) sendBytes(chID byte, msgBytes []byte, timeout time.Duratio
 
 // CanSend returns true if you can send more data onto the chID, false
 // otherwise. Use only as a heuristic.
+//
+// thread-safe
 func (c *MConnection) CanSend(chID byte) bool {
 	if !c.IsRunning() {
 		return false
 	}
 
+	c.mtx.RLock()
 	channel, ok := c.channelsIdx[chID]
+	c.mtx.RUnlock()
 	if !ok {
 		c.Logger.Error(fmt.Sprintf("Unknown channel %X", chID))
 		return false
@@ -432,9 +443,11 @@ FOR_LOOP:
 			// something is written to .bufConnWriter.
 			c.flush()
 		case <-c.chStatsTimer.C:
+			c.mtx.RLock()
 			for _, channel := range c.channelsIdx {
 				channel.updateStats()
 			}
+			c.mtx.RUnlock()
 		case <-c.pingTimer.C:
 			c.Logger.Debug("Send Ping")
 			_n, err = protoWriter.WriteMsg(mustWrapPacket(&tmp2p.PacketPing{}))
@@ -518,7 +531,7 @@ func (c *MConnection) sendBatchPacketMsgs(w protoio.Writer, batchSize int) bool 
 		}
 	}()
 	for i := 0; i < batchSize; i++ {
-		channel := selectChannelToGossipOn(c.channelsIdx)
+		channel := c.selectChannelToGossipOn()
 		// nothing to send across any channel.
 		if channel == nil {
 			return true
@@ -536,12 +549,15 @@ func (c *MConnection) sendBatchPacketMsgs(w protoio.Writer, batchSize int) bool 
 // TODO: Make "batchChannelToGossipOn", so we can do our proto marshaling overheads in parallel,
 // and we can avoid re-checking for `isSendPending`.
 // We can easily mock the recentlySent differences for the batch choosing.
-func selectChannelToGossipOn(channelsIdx map[byte]*Channel) *Channel {
+func (c *MConnection) selectChannelToGossipOn() *Channel {
+	c.mtx.RLock()
+	defer c.mtx.RUnlock()
+
 	// Choose a channel to create a PacketMsg from.
 	// The chosen channel will be the one whose recentlySent/priority is the least.
 	var leastRatio float32 = math.MaxFloat32
 	var leastChannel *Channel
-	for _, channel := range channelsIdx {
+	for _, channel := range c.channelsIdx {
 		// If nothing to send, skip this channel
 		// TODO: Skip continually looking for isSendPending on channels we've already skipped in this batch-send.
 		if !channel.isSendPending() {
@@ -646,7 +662,9 @@ FOR_LOOP:
 			}
 		case *tmp2p.Packet_PacketMsg:
 			channelID := byte(pkt.PacketMsg.ChannelID)
+			c.mtx.RLock()
 			channel, ok := c.channelsIdx[channelID]
+			c.mtx.RUnlock()
 			if pkt.PacketMsg.ChannelID < 0 || pkt.PacketMsg.ChannelID > math.MaxUint8 || !ok || channel == nil {
 				err := fmt.Errorf("unknown channel %X", pkt.PacketMsg.ChannelID)
 				c.Logger.Debug("Connection failed @ recvRoutine", "err", err)

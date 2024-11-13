@@ -6,12 +6,6 @@ import (
 	na "github.com/cometbft/cometbft/p2p/netaddr"
 )
 
-const (
-	// HandshakeStreamID is the stream ID for the handshake stream.
-	// No reactor can use the same stream ID to avoid conflicts.
-	HandshakeStreamID byte = 0x00
-)
-
 // Transport connects the local node to the rest of the network.
 type Transport interface {
 	// NetAddr returns the network address of the local node.
