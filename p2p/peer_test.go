@@ -139,7 +139,7 @@ func testOutboundPeerConn(addr *na.NetAddr, config *config.P2PConfig, persistent
 		return pc, fmt.Errorf("creating peer: %w", err)
 	}
 
-	pc, err = testPeerConn(conn, config, true, persistent, addr)
+	pc, err = testPeerConn(conn, true, persistent, addr)
 	if err != nil {
 		_ = conn.Close(err.Error())
 		return pc, err
@@ -221,7 +221,7 @@ func (rp *remotePeer) accept() {
 
 		conn := newMockConnection(netConn)
 
-		pc, err := testInboundPeerConn(conn, rp.Config)
+		pc, err := testInboundPeerConn(conn)
 		if err != nil {
 			_ = conn.Close(err.Error())
 			golog.Fatalf("Failed to create a peer: %+v", err)

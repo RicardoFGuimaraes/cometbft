@@ -200,7 +200,7 @@ func (sw *Switch) addPeerWithConnection(conn abstract.Connection) error {
 		}
 	}
 
-	pc, err := testInboundPeerConn(conn, sw.config)
+	pc, err := testInboundPeerConn(conn)
 	if err != nil {
 		closeConn(err)
 		return err
@@ -289,30 +289,15 @@ func MakeSwitch(
 
 func testInboundPeerConn(
 	conn abstract.Connection,
-	config *config.P2PConfig,
-	// ourNodePrivKey crypto.PrivKey,
 ) (peerConn, error) {
-	return testPeerConn(conn, config, false, false, nil)
+	return testPeerConn(conn, false, false, nil)
 }
 
 func testPeerConn(
-	rawConn abstract.Connection,
-	cfg *config.P2PConfig,
+	conn abstract.Connection,
 	outbound, persistent bool,
-	// _ourNodePrivKey crypto.PrivKey,
 	socketAddr *na.NetAddr,
 ) (pc peerConn, err error) {
-	conn := rawConn
-
-	// Fuzz connection
-	// TODO: uncomment
-	if cfg.TestFuzz {
-		fmt.Println("Fuzzing connection")
-		// 	// so we have time to do peer handshakes and get set up
-		// 	conn = fuzz.ConnAfterFromConfig(conn, 10*time.Second, cfg.TestFuzzConfig)
-	}
-
-	// Only the information we already have
 	return newPeerConn(outbound, persistent, conn, socketAddr), nil
 }
 

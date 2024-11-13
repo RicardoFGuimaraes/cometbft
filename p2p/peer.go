@@ -18,6 +18,7 @@ import (
 	na "github.com/cometbft/cometbft/p2p/netaddr"
 	ni "github.com/cometbft/cometbft/p2p/nodeinfo"
 	"github.com/cometbft/cometbft/p2p/nodekey"
+	tcpconn "github.com/cometbft/cometbft/p2p/transport/tcp/conn"
 	"github.com/cometbft/cometbft/types"
 )
 
@@ -475,19 +476,20 @@ func (p *peer) metricsReporter() {
 	for {
 		select {
 		case <-metricsTicker.C:
-			// TODO: uncomment
-			// status := p.Status()
-			// var sendQueueSize float64
-			// for _, chStatus := range status.Channels {
-			// 	sendQueueSize += float64(chStatus.SendQueueSize)
-			// }
+			// TODO: this is a bit of a hack, we should have a better way to get the status.
+			status := p.Status().(tcpconn.ConnectionStatus)
+			var sendQueueSize float64
+			for _, chStatus := range status.Channels {
+				sendQueueSize += float64(chStatus.SendQueueSize)
+			}
 
-			// p.metrics.RecvRateLimiterDelay.With("peer_id", string(p.ID())).
-			// 	Add(status.RecvMonitor.SleepTime.Seconds())
-			// p.metrics.SendRateLimiterDelay.With("peer_id", string(p.ID())).
-			// 	Add(status.SendMonitor.SleepTime.Seconds())
+			p.metrics.RecvRateLimiterDelay.With("peer_id", string(p.ID())).
+				Add(status.RecvMonitor.SleepTime.Seconds())
+			p.metrics.SendRateLimiterDelay.With("peer_id", string(p.ID())).
+				Add(status.SendMonitor.SleepTime.Seconds())
 
-			// p.metrics.PeerPendingSendBytes.With("peer_id", string(p.ID())).Set(sendQueueSize)
+			p.metrics.PeerPendingSendBytes.With("peer_id", string(p.ID())).Set(sendQueueSize)
+
 			// Report per peer, per message total bytes, since the last interval
 			func() {
 				p.pendingMetrics.mtx.Lock()
