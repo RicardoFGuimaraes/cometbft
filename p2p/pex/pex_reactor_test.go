@@ -319,7 +319,7 @@ func TestPEXReactorSeedMode(t *testing.T) {
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 
-	pexRConfig := &ReactorConfig{SeedMode: true, SeedDisconnectWaitPeriod: 10 * time.Millisecond}
+	pexRConfig := &ReactorConfig{SeedMode: true, SeedDisconnectWaitPeriod: 100 * time.Millisecond}
 	pexR, book := createReactor(pexRConfig)
 	defer teardownReactor(book)
 
