@@ -47,18 +47,24 @@ func (s *MConnectionStream) Read(b []byte) (n int, err error) {
 					s.unreadBytes = msgBytes[n:]
 				}
 				return n, nil
+			case <-s.conn.Quit():
+				return 0, ErrNotRunning
 			case <-time.After(readTimeout):
 				return 0, ErrTimeout
 			}
 		}
 
 		// read without timeout
-		msgBytes := <-ch
-		n = copy(b, msgBytes)
-		if n < len(msgBytes) {
-			s.unreadBytes = msgBytes[n:]
+		select {
+		case msgBytes := <-ch:
+			n = copy(b, msgBytes)
+			if n < len(msgBytes) {
+				s.unreadBytes = msgBytes[n:]
+			}
+			return n, nil
+		case <-s.conn.Quit():
+			return 0, ErrNotRunning
 		}
-		return n, nil
 	}
 
 	// No messages to read.

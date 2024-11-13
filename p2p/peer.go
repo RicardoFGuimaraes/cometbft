@@ -199,27 +199,32 @@ func (p *peer) streamReadLoop(streamID byte, stream abstract.Stream) {
 		}
 	}()
 
+	var (
+		buf     = make([]byte, 1000)
+		reactor = p.streamInfoByStreamID[streamID].reactor
+		msgType = p.streamInfoByStreamID[streamID].msgType
+		logger  = p.Logger.With("stream", streamID)
+	)
+
 	for {
 		if !p.IsRunning() {
 			return
 		}
 
-		buf := make([]byte, 1024) // TODO max msg size for this stream
 		n, err := stream.Read(buf)
 		if (n == 0 && err == nil) || errors.Is(err, io.EOF) {
 			continue
 		}
 		if err != nil {
-			p.Logger.Error("Error reading from stream", "stream", streamID, "err", err)
+			logger.Error("stream.Read", "err", err)
 			p.onPeerError(p, err)
 			return
 		}
 
-		msgType := p.streamInfoByStreamID[streamID].msgType
 		msg := proto.Clone(msgType)
 		err = proto.Unmarshal(buf[:n], msg)
 		if err != nil {
-			p.Logger.Error("Error unmarshaling message", "as", reflect.TypeOf(msgType), "err", err)
+			logger.Error("proto.Unmarshal", "as", reflect.TypeOf(msgType), "err", err)
 			p.onPeerError(p, err)
 			return
 		}
@@ -227,17 +232,16 @@ func (p *peer) streamReadLoop(streamID byte, stream abstract.Stream) {
 		if w, ok := msg.(types.Unwrapper); ok {
 			msg, err = w.Unwrap()
 			if err != nil {
-				p.Logger.Error("Error uwrapping message", "err", err)
+				logger.Error("proto.Unwrap", "err", err)
 				p.onPeerError(p, err)
 				return
 			}
 		}
 
-		p.Logger.Debug("Received message", "stream", streamID, "msg", msg)
+		logger.Debug("Received message", "msg", msg)
 
 		p.pendingMetrics.AddPendingRecvBytes(getMsgType(msg), n)
 
-		reactor := p.streamInfoByStreamID[streamID].reactor
 		reactor.Receive(Envelope{
 			ChannelID: streamID,
 			Src:       p,
