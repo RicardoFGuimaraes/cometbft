@@ -292,18 +292,7 @@ func (c *MConnection) Close(reason string) error {
 	default:
 	}
 
-	if c.stopServices() {
-		return nil
-	}
-
-	// We can't close pong safely here because
-	// recvRoutine may write to it after we've stopped.
-	// Though it doesn't need to get closed at all,
-	// we close it @ recvRoutine.
-
-	// c.Stop()
-
-	return c.conn.Close()
+	return c.Stop()
 }
 
 // FlushAndClose replicates the logic of OnStop. It additionally ensures that
@@ -342,8 +331,6 @@ func (c *MConnection) FlushAndClose(reason string) error {
 	// recvRoutine may write to it after we've stopped.
 	// Though it doesn't need to get closed at all,
 	// we close it @ recvRoutine.
-
-	// c.Stop()
 
 	return c.conn.Close()
 }
