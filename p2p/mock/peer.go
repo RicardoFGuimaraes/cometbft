@@ -2,12 +2,10 @@ package mock
 
 import (
 	"net"
-	"time"
 
 	"github.com/cometbft/cometbft/crypto/ed25519"
 	"github.com/cometbft/cometbft/libs/service"
 	"github.com/cometbft/cometbft/p2p"
-	"github.com/cometbft/cometbft/p2p/abstract"
 	na "github.com/cometbft/cometbft/p2p/netaddr"
 	ni "github.com/cometbft/cometbft/p2p/nodeinfo"
 	"github.com/cometbft/cometbft/p2p/nodekey"
@@ -79,48 +77,8 @@ func (mp *Peer) Get(key string) any {
 func (mp *Peer) Set(key string, value any) {
 	mp.kv[key] = value
 }
-func (mp *Peer) RemoteIP() net.IP          { return mp.ip }
-func (mp *Peer) SocketAddr() *na.NetAddr   { return mp.addr }
-func (mp *Peer) RemoteAddr() net.Addr      { return &net.TCPAddr{IP: mp.ip, Port: 8800} }
-func (mp *Peer) Conn() abstract.Connection { return mockConnection{mp.server} }
-func (*Peer) SetRemovalFailed()            {}
-func (*Peer) GetRemovalFailed() bool       { return false }
-
-type mockStream struct {
-	net.Conn
-}
-
-func (s mockStream) Read(b []byte) (n int, err error) {
-	return s.Conn.Read(b)
-}
-
-func (s mockStream) Write(b []byte) (n int, err error) {
-	return s.Conn.Write(b)
-}
-
-func (mockStream) Close() error {
-	return nil
-}
-func (s mockStream) SetDeadline(t time.Time) error      { return s.Conn.SetReadDeadline(t) }
-func (s mockStream) SetReadDeadline(t time.Time) error  { return s.Conn.SetReadDeadline(t) }
-func (s mockStream) SetWriteDeadline(t time.Time) error { return s.Conn.SetWriteDeadline(t) }
-
-type mockConnection struct {
-	net.Conn
-}
-
-func (c mockConnection) OpenStream(byte, any) (abstract.Stream, error) {
-	return mockStream(c), nil
-}
-
-func (c mockConnection) LocalAddr() net.Addr {
-	return c.Conn.LocalAddr()
-}
-
-func (c mockConnection) RemoteAddr() net.Addr {
-	return c.Conn.RemoteAddr()
-}
-func (c mockConnection) Close(string) error         { return c.Conn.Close() }
-func (c mockConnection) FlushAndClose(string) error { return c.Conn.Close() }
-func (mockConnection) ConnectionState() any         { return nil }
-func (mockConnection) ErrorCh() <-chan error        { return nil }
+func (mp *Peer) RemoteIP() net.IP        { return mp.ip }
+func (mp *Peer) SocketAddr() *na.NetAddr { return mp.addr }
+func (mp *Peer) RemoteAddr() net.Addr    { return &net.TCPAddr{IP: mp.ip, Port: 8800} }
+func (*Peer) SetRemovalFailed()          {}
+func (*Peer) GetRemovalFailed() bool     { return false }

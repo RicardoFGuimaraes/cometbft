@@ -51,9 +51,6 @@ type Peer interface {
 	IsOutbound() bool   // did we dial the peer
 	IsPersistent() bool // do we redial this peer when we disconnect
 
-	// Conn returns the underlying connection.
-	// Conn() abstract.Connection
-
 	NodeInfo() ni.NodeInfo // peer's info
 	Status() any
 	SocketAddr() *na.NetAddr // actual address of the socket
@@ -438,11 +435,6 @@ func (p *peer) HasChannel(chID byte) bool {
 	}
 	return false
 }
-
-// Conn returns the underlying peer source connection.
-// func (p *peer) Conn() abstract.Connection {
-// 	return p.Connection
-// }
 
 func (p *peer) SetRemovalFailed() {
 	p.removalAttemptFailed = true
