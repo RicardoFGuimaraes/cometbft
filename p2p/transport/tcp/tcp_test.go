@@ -215,12 +215,6 @@ func TestTransportMultiplex_AcceptMultiple(t *testing.T) {
 		t.Errorf("have %v, want %v", have, want)
 	}
 
-	for _, c := range conns {
-		if err := mt.Cleanup(c); err != nil {
-			t.Fatal(err)
-		}
-	}
-
 	if err := mt.Close(); err != nil {
 		t.Errorf("close errored: %v", err)
 	}

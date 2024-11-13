@@ -16,11 +16,6 @@ type Transport interface {
 
 	// Dial dials the given address and returns a connection.
 	Dial(addr na.NetAddr) (Connection, error)
-
-	// Cleanup any resources associated with the given connection.
-	//
-	// Must be run when the peer is dropped for any reason.
-	Cleanup(conn Connection) error
 }
 
 // StreamDescriptor describes a data stream. This could be a substream within a

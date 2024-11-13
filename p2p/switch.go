@@ -329,12 +329,9 @@ func (sw *Switch) stopAndRemovePeer(p Peer, reason any) {
 	// Returning early if the peer is already stopped prevents data races because
 	// this function may be called from multiple places at once.
 	if err := p.Stop(); err != nil {
-		sw.Logger.Error("error stopping peer", "peer", p.ID(), "err", err)
+		sw.Logger.Error("error stopping peer", "peer", p, "err", err)
 		return
 	}
-
-	// ignore errors because the peer is already stopped
-	_ = sw.transport.Cleanup(p.Conn())
 
 	for _, reactor := range sw.reactors {
 		reactor.RemovePeer(p, reason)
@@ -347,7 +344,7 @@ func (sw *Switch) stopAndRemovePeer(p Peer, reason any) {
 	if !sw.peers.Remove(p) {
 		// Removal of the peer has failed. The function above sets a flag within the peer to mark this.
 		// We keep this message here as information to the developer.
-		sw.Logger.Debug("error on peer removal", "peer", p.ID())
+		sw.Logger.Debug("error on peer removal", "peer", p)
 		return
 	}
 
@@ -644,7 +641,6 @@ func (sw *Switch) acceptRoutine() {
 		stream, err := conn.OpenStream(HandshakeStreamID, nil)
 		if err != nil {
 			sw.Logger.Error("Failed to open handshake stream", "err", err)
-			_ = sw.transport.Cleanup(conn)
 			continue
 		}
 		defer stream.Close()
@@ -659,8 +655,6 @@ func (sw *Switch) acceptRoutine() {
 				sw.addrBook.RemoveAddress(addr)
 				sw.addrBook.AddOurAddress(addr)
 			}
-
-			_ = sw.transport.Cleanup(conn)
 
 			sw.Logger.Info(
 				"Inbound Peer rejected",
@@ -695,14 +689,11 @@ func (sw *Switch) acceptRoutine() {
 					"max", sw.config.MaxNumInboundPeers,
 				)
 
-				_ = sw.transport.Cleanup(conn)
-
 				continue
 			}
 		}
 
 		if err := sw.addPeer(p); err != nil {
-			_ = sw.transport.Cleanup(conn)
 			if p.IsRunning() {
 				_ = p.Stop()
 			}
@@ -746,7 +737,6 @@ func (sw *Switch) addOutboundPeerWithConfig(
 	stream, err := conn.OpenStream(HandshakeStreamID, nil)
 	if err != nil {
 		sw.Logger.Error("Failed to open handshake stream", "err", err)
-		_ = sw.transport.Cleanup(conn)
 		return err
 	}
 	defer stream.Close()
@@ -760,8 +750,6 @@ func (sw *Switch) addOutboundPeerWithConfig(
 			sw.addrBook.RemoveAddress(addr)
 			sw.addrBook.AddOurAddress(addr)
 		}
-
-		_ = sw.transport.Cleanup(conn)
 
 		return err
 	}
@@ -779,7 +767,6 @@ func (sw *Switch) addOutboundPeerWithConfig(
 		addr)
 
 	if err := sw.addPeer(p); err != nil {
-		_ = sw.transport.Cleanup(conn)
 		if p.IsRunning() {
 			_ = p.Stop()
 		}

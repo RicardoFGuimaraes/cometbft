@@ -187,6 +187,8 @@ func (mt *MultiplexTransport) Dial(addr na.NetAddr) (abstract.Connection, error)
 	}
 	mconn.SetLogger(mt.logger.With("remote", addr))
 
+	go mt.cleanupConn(c.RemoteAddr(), mconn.Quit())
+
 	return mconn, mconn.Start()
 }
 
@@ -216,6 +218,15 @@ func (mt *MultiplexTransport) Listen(addr na.NetAddr) error {
 	go mt.acceptPeers()
 
 	return nil
+}
+
+func (mt *MultiplexTransport) cleanupConn(netAddr net.Addr, quitCh <-chan struct{}) {
+	select {
+	case <-quitCh:
+		mt.conns.RemoveAddr(netAddr)
+	case <-mt.closec:
+		return
+	}
 }
 
 func (mt *MultiplexTransport) acceptPeers() {
@@ -273,6 +284,7 @@ func (mt *MultiplexTransport) acceptPeers() {
 					id := nodekey.PubKeyToID(remotePubKey)
 					netAddr = na.New(id, addr)
 					mconn.SetLogger(mt.logger.With("remote", netAddr))
+					go mt.cleanupConn(addr, mconn.Quit())
 					err = mconn.Start()
 				}
 			}
@@ -287,14 +299,6 @@ func (mt *MultiplexTransport) acceptPeers() {
 			}
 		}(c)
 	}
-}
-
-// Cleanup removes the given address from the connections set and
-// closes the connection.
-func (mt *MultiplexTransport) Cleanup(c abstract.Connection) error {
-	mconn := c.(*conn.MConnection)
-	mt.conns.Remove(mconn.Conn())
-	return mconn.Stop()
 }
 
 func (mt *MultiplexTransport) filterConn(c net.Conn) (err error) {
