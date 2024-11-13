@@ -34,7 +34,8 @@ type peerConfig struct {
 	// isPersistent allows you to set a function, which, given socket address
 	// (for outbound peers) OR self-reported address (for inbound peers), tells
 	// if the peer is persistent or not.
-	isPersistent         func(*na.NetAddr) bool
+	isPersistent func(*na.NetAddr) bool
+	// streamID -> streamInfo
 	streamInfoByStreamID map[byte]streamInfo
 	metrics              *Metrics
 }
@@ -149,6 +150,7 @@ type peer struct {
 	// When removal of a peer fails, we set this flag
 	removalAttemptFailed bool
 
+	// streamID -> streamInfo
 	streamInfoByStreamID map[byte]streamInfo
 	onPeerError          func(Peer, any)
 }
@@ -156,7 +158,9 @@ type peer struct {
 type PeerOption func(*peer)
 
 type streamInfo struct {
+	// Reactor associated with this stream.
 	reactor Reactor
+	// Message type for this stream.
 	msgType proto.Message
 }
 
@@ -186,7 +190,7 @@ func newPeer(
 	return p
 }
 
-func (p *peer) readLoop(streamID byte, stream abstract.Stream) {
+func (p *peer) streamReadLoop(streamID byte, stream abstract.Stream) {
 	defer func() {
 		if r := recover(); r != nil {
 			p.Logger.Error("Peer panicked", "err", r, "stack", string(debug.Stack()))
@@ -280,7 +284,7 @@ func (p *peer) OnStart() error {
 
 	// TODO: establish priority for reading from streams (consensus -> evidence -> mempool).
 	for streamID, stream := range p.streams {
-		go p.readLoop(streamID, stream)
+		go p.streamReadLoop(streamID, stream)
 	}
 
 	go p.metricsReporter()
@@ -452,14 +456,6 @@ func (p *peer) GetRemovalFailed() bool {
 func (p *peer) RemoteAddr() net.Addr {
 	return p.Connection.RemoteAddr()
 }
-
-// CanSend returns true if the send queue is not full, false otherwise.
-// func (p *peer) CanSend(chID byte) bool {
-// 	if !p.IsRunning() {
-// 		return false
-// 	}
-// 	return p.conn.CanSend(chID)
-// }
 
 // ---------------------------------------------------
 

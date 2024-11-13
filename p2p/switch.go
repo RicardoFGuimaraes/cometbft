@@ -640,7 +640,7 @@ func (sw *Switch) acceptRoutine() {
 
 		stream, err := conn.OpenStream(HandshakeStreamID, nil)
 		if err != nil {
-			sw.Logger.Error("Failed to open handshake stream", "err", err)
+			sw.Logger.Error("Failed to open handshake stream", "peer", addr, "err", err)
 			continue
 		}
 
@@ -736,7 +736,7 @@ func (sw *Switch) addOutboundPeerWithConfig(
 
 	stream, err := conn.OpenStream(HandshakeStreamID, nil)
 	if err != nil {
-		sw.Logger.Error("Failed to open handshake stream", "err", err)
+		sw.Logger.Error("Failed to open handshake stream", "peer", addr, "err", err)
 		return err
 	}
 

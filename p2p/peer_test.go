@@ -71,8 +71,6 @@ func TestPeerSend(t *testing.T) {
 		}
 	})
 
-	// TODO: uncomment or remove
-	// assert.True(p.CanSend(testCh))
 	assert.True(t, p.Send(Envelope{ChannelID: testCh, Message: &p2p.Message{}}))
 }
 

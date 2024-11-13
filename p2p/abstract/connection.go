@@ -33,7 +33,7 @@ type Connection interface {
 	// Warning: This API should not be considered stable and might change soon.
 	ConnectionState() any
 
-	// ErrorCh returns a channel that is closed when an error occurs.
+	// ErrorCh returns a channel that will receive errors from the connection.
 	ErrorCh() <-chan error
 }
 

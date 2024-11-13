@@ -12,7 +12,6 @@ type mockStream struct {
 }
 
 func (s mockStream) Read(b []byte) (n int, err error) {
-	// TODO: proper stream IDs
 	return s.Conn.Read(b)
 }
 
