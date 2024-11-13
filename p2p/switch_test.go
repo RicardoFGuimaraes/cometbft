@@ -22,7 +22,6 @@ import (
 	"github.com/cometbft/cometbft/config"
 	"github.com/cometbft/cometbft/crypto"
 	"github.com/cometbft/cometbft/crypto/ed25519"
-	"github.com/cometbft/cometbft/libs/bytes"
 	"github.com/cometbft/cometbft/libs/log"
 	cmtsync "github.com/cometbft/cometbft/libs/sync"
 	"github.com/cometbft/cometbft/p2p/abstract"
@@ -220,21 +219,23 @@ func assertMsgReceivedWithTimeout(
 
 func TestSwitchFiltersOutItself(t *testing.T) {
 	s1 := MakeSwitch(cfg, 1, initSwitchFunc)
+	err := s1.Start()
+	require.NoError(t, err)
+	defer s1.Stop() //nolint:errcheck
 
 	// simulate s1 having a public IP by creating a remote peer with the same ID
-	rp := newRemoteTCPPeer()
+	rp := newRemoteTCPPeerWithPrivKey(s1.nodeKey.PrivKey)
 	rp.Start()
 
 	// addr should be rejected in addPeer based on the same ID
-	err := s1.DialPeerWithAddress(rp.Addr())
-	if assert.Error(t, err) { //nolint:testifylint // require.Error doesn't work with the conditional here
-		if err, ok := err.(ErrRejected); ok {
-			if !err.IsSelf() {
-				t.Errorf("expected self to be rejected")
-			}
-		} else {
-			t.Errorf("expected ErrRejected")
+	err = s1.DialPeerWithAddress(rp.Addr())
+	require.Error(t, err)
+	if errR, ok := err.(ErrRejected); ok {
+		if !errR.IsSelf() {
+			t.Errorf("expected self to be rejected, but got %v", errR)
 		}
+	} else {
+		t.Fatalf("expected ErrRejected, but got %v", err)
 	}
 
 	assert.True(t, s1.addrBook.OurAddress(rp.Addr()))
@@ -921,9 +922,7 @@ func TestSwitchRemovalErr(t *testing.T) {
 }
 
 type remoteTCPPeer struct {
-	PrivKey   crypto.PrivKey
-	Config    *config.P2PConfig
-	channels  bytes.HexBytes
+	privKey   crypto.PrivKey
 	transport *tcp.MultiplexTransport
 }
 
@@ -931,7 +930,15 @@ func newRemoteTCPPeer() *remoteTCPPeer {
 	privKey := ed25519.GenPrivKey()
 	nodeKey := nodekey.NodeKey{PrivKey: privKey}
 	return &remoteTCPPeer{
-		PrivKey:   privKey,
+		privKey:   privKey,
+		transport: tcp.NewMultiplexTransport(nodeKey, tcpconn.DefaultMConnConfig()),
+	}
+}
+
+func newRemoteTCPPeerWithPrivKey(privKey crypto.PrivKey) *remoteTCPPeer {
+	nodeKey := nodekey.NodeKey{PrivKey: privKey}
+	return &remoteTCPPeer{
+		privKey:   privKey,
 		transport: tcp.NewMultiplexTransport(nodeKey, tcpconn.DefaultMConnConfig()),
 	}
 }
@@ -942,11 +949,11 @@ func (rp *remoteTCPPeer) Addr() *na.NetAddr {
 }
 
 func (rp *remoteTCPPeer) ID() nodekey.ID {
-	return nodekey.PubKeyToID(rp.PrivKey.PubKey())
+	return nodekey.PubKeyToID(rp.privKey.PubKey())
 }
 
 func (rp *remoteTCPPeer) Start() {
-	id := nodekey.PubKeyToID(rp.PrivKey.PubKey())
+	id := nodekey.PubKeyToID(rp.privKey.PubKey())
 	addr, err := na.NewFromString(string(id) + "@127.0.0.1:0")
 	if err != nil {
 		panic(err)
@@ -955,10 +962,7 @@ func (rp *remoteTCPPeer) Start() {
 	if err != nil {
 		panic(err)
 	}
-
-	if rp.channels == nil {
-		rp.channels = []byte{testCh}
-	}
+	go rp.accept()
 }
 
 func (rp *remoteTCPPeer) Stop() {
@@ -966,13 +970,47 @@ func (rp *remoteTCPPeer) Stop() {
 }
 
 func (rp *remoteTCPPeer) Dial(addr *na.NetAddr) (abstract.Connection, error) {
-	return rp.transport.Dial(*addr)
+	c, err := rp.transport.Dial(*addr)
+	if err != nil {
+		return nil, err
+	}
+
+	stream, err := c.OpenStream(HandshakeStreamID, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer stream.Close()
+
+	_, err = handshake(rp.nodeInfo(), stream, time.Second)
+	if err != nil {
+		return nil, err
+	}
+	return c, err
 }
 
 func (rp *remoteTCPPeer) nodeInfo() ni.NodeInfo {
 	la := rp.Addr()
 	nodeInfo := testNodeInfo(rp.ID(), "remote_peer_"+la.String())
-	nodeInfo.ListenAddr = la.String()
-	nodeInfo.Channels = rp.channels
+	nodeInfo.Channels = []byte{testCh}
 	return nodeInfo
+}
+
+func (rp *remoteTCPPeer) accept() {
+	for {
+		c, _, err := rp.transport.Accept()
+		if err != nil {
+			return
+		}
+
+		stream, err := c.OpenStream(HandshakeStreamID, nil)
+		if err != nil {
+			_ = c.Close(err.Error())
+		}
+		defer stream.Close()
+
+		_, err = handshake(rp.nodeInfo(), stream, time.Second)
+		if err != nil {
+			_ = c.Close(err.Error())
+		}
+	}
 }

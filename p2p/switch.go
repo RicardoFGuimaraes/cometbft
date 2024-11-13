@@ -724,7 +724,7 @@ func (sw *Switch) addOutboundPeerWithConfig(
 	addr *na.NetAddr,
 	cfg *config.P2PConfig,
 ) error {
-	sw.Logger.Debug("Dialing peer", "address", addr)
+	sw.Logger.Debug("Dialing peer", "addr", addr)
 
 	// XXX(xla): Remove the leakage of test concerns in implementation.
 	if cfg.TestDialFail {
