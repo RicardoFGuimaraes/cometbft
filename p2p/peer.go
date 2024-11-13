@@ -204,7 +204,7 @@ func (p *peer) readLoop() {
 		default:
 			// TODO: establish priority for reading from streams (consensus -> evidence -> mempool).
 			for streamID, stream := range p.streams {
-				buf := make([]byte, 1024) // TODO max msg size for this stream
+				buf := make([]byte, 10000) // TODO max msg size for this stream
 				n, err := stream.Read(buf)
 				if (n == 0 && err == nil) || errors.Is(err, io.EOF) {
 					continue
@@ -267,8 +267,16 @@ func (p *peer) SetLogger(l log.Logger) {
 func (p *peer) OnStart() error {
 	// Open streams for all reactors.
 	p.streams = make(map[byte]abstract.Stream)
-	for streamID := range p.streamInfoByStreamID {
-		stream, err := p.peerConn.OpenStream(streamID)
+	for streamID, info := range p.streamInfoByStreamID {
+		var d abstract.StreamDescriptor
+		descs := info.reactor.StreamDescriptors()
+		for _, desc := range descs {
+			if desc.StreamID() == streamID {
+				d = desc
+				break
+			}
+		}
+		stream, err := p.peerConn.OpenStream(streamID, d)
 		if err != nil {
 			return fmt.Errorf("opening stream %v: %w", streamID, err)
 		}

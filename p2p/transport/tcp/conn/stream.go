@@ -1,14 +1,14 @@
 package conn
 
 import (
-	"io"
 	"time"
 )
 
 // MCConnectionStream is just a wrapper around the original net.Conn.
 type MConnectionStream struct {
-	conn     *MConnection
-	streadID byte
+	conn        *MConnection
+	streadID    byte
+	unreadBytes []byte
 
 	deadline      time.Time
 	readDeadline  time.Time
@@ -17,17 +17,32 @@ type MConnectionStream struct {
 
 // Read reads whole messages from the internal map, which is populated by the
 // global read loop.
-func (s MConnectionStream) Read(b []byte) (n int, err error) {
+func (s *MConnectionStream) Read(b []byte) (n int, err error) {
+	// If there are unread bytes, read them first.
+	if len(s.unreadBytes) > 0 {
+		n = copy(b, s.unreadBytes)
+		if n < len(s.unreadBytes) {
+			s.unreadBytes = s.unreadBytes[n:]
+		} else {
+			s.unreadBytes = nil
+		}
+		return n, nil
+	}
+
+	s.conn.mtx.RLock()
+	ch, ok := s.conn.recvMsgsByStreamID[s.streadID]
+	s.conn.mtx.RUnlock()
+
 	// If there are messages to read, read them.
-	if _, ok := s.conn.recvMsgsByStreamID[s.streadID]; ok {
+	if ok {
 		readTimeout := s.readTimeout()
 		if readTimeout > 0 { // read with timeout
 			select {
-			case msgBytes := <-s.conn.recvMsgsByStreamID[s.streadID]:
-				if len(b) < len(msgBytes) {
-					return len(msgBytes), io.ErrShortBuffer
-				}
+			case msgBytes := <-ch:
 				n = copy(b, msgBytes)
+				if n < len(msgBytes) {
+					s.unreadBytes = msgBytes[n:]
+				}
 				return n, nil
 			case <-time.After(readTimeout):
 				return 0, ErrTimeout
@@ -35,11 +50,11 @@ func (s MConnectionStream) Read(b []byte) (n int, err error) {
 		}
 
 		// read without timeout
-		msgBytes := <-s.conn.recvMsgsByStreamID[s.streadID]
-		if len(b) < len(msgBytes) {
-			return len(msgBytes), io.ErrShortBuffer
-		}
+		msgBytes := <-ch
 		n = copy(b, msgBytes)
+		if n < len(msgBytes) {
+			s.unreadBytes = msgBytes[n:]
+		}
 		return n, nil
 	}
 
@@ -49,7 +64,7 @@ func (s MConnectionStream) Read(b []byte) (n int, err error) {
 
 // Write queues bytes to be sent onto the internal write queue. It returns
 // len(b), but it doesn't guarantee that the Write actually succeeds.
-func (s MConnectionStream) Write(b []byte) (n int, err error) {
+func (s *MConnectionStream) Write(b []byte) (n int, err error) {
 	if err := s.conn.sendBytes(s.streadID, b, s.writeTimeout()); err != nil {
 		return 0, err
 	}

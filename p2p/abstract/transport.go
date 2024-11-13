@@ -6,6 +6,12 @@ import (
 	na "github.com/cometbft/cometbft/p2p/netaddr"
 )
 
+const (
+	// HandshakeStreamID is the stream ID for the handshake stream.
+	// No reactor can use the same stream ID to avoid conflicts.
+	HandshakeStreamID byte = 0x00
+)
+
 // Transport connects the local node to the rest of the network.
 type Transport interface {
 	// NetAddr returns the network address of the local node.
@@ -21,13 +27,6 @@ type Transport interface {
 	//
 	// Must be run when the peer is dropped for any reason.
 	Cleanup(conn Connection) error
-
-	// UpdateStreamDescriptors updates the stream descriptors when a new reactor
-	// is added or an old one gets removed.
-	//
-	// See StreamDescriptor
-	// Warning: This API should not be considered stable and might change soon.
-	UpdateStreamDescriptors(descs []StreamDescriptor)
 }
 
 // StreamDescriptor describes a data stream. This could be a substream within a

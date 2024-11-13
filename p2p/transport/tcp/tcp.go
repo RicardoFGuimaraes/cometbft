@@ -218,18 +218,6 @@ func (mt *MultiplexTransport) Listen(addr na.NetAddr) error {
 	return nil
 }
 
-func (mt *MultiplexTransport) UpdateStreamDescriptors(desc []abstract.StreamDescriptor) {
-	chDescs := make([]conn.ChannelDescriptor, len(desc))
-	for i, d := range desc {
-		var ok bool
-		chDescs[i], ok = d.(conn.ChannelDescriptor)
-		if !ok {
-			panic(fmt.Sprintf("unexpected StreamDescriptor type: %T", d))
-		}
-	}
-	mt.mConfig.ChannelDescs = chDescs
-}
-
 func (mt *MultiplexTransport) acceptPeers() {
 	for {
 		c, err := mt.listener.Accept()

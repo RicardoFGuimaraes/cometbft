@@ -28,11 +28,10 @@ func createMConnectionWithSingleStream(t *testing.T, conn net.Conn) (*MConnectio
 	cfg := DefaultMConnConfig()
 	cfg.PingInterval = 90 * time.Millisecond
 	cfg.PongTimeout = 45 * time.Millisecond
-	cfg.ChannelDescs = []ChannelDescriptor{{ID: testStreamID, Priority: 1, SendQueueCapacity: 1}}
 	c := NewMConnection(conn, cfg)
 	c.SetLogger(log.TestingLogger())
 
-	stream, err := c.OpenStream(testStreamID)
+	stream, err := c.OpenStream(testStreamID, nil)
 	require.NoError(t, err)
 
 	return c, stream.(*MConnectionStream)
@@ -343,12 +342,11 @@ func newClientAndServerConnsForReadErrors(t *testing.T) (*MConnection, *MConnect
 	cfg := DefaultMConnConfig()
 	cfg.PingInterval = 90 * time.Millisecond
 	cfg.PongTimeout = 45 * time.Millisecond
-	cfg.ChannelDescs = []ChannelDescriptor{
-		{ID: testStreamID, Priority: 1, SendQueueCapacity: 1},
-		{ID: 0x02, Priority: 1, SendQueueCapacity: 1},
-	}
 	mconnClient := NewMConnection(client, cfg)
-	clientStream, err := mconnClient.OpenStream(testStreamID)
+	clientStream, err := mconnClient.OpenStream(testStreamID, ChannelDescriptor{ID: testStreamID, Priority: 1, SendQueueCapacity: 1})
+	require.NoError(t, err)
+	// create another channel
+	_, err = mconnClient.OpenStream(0x02, ChannelDescriptor{ID: 0x02, Priority: 1, SendQueueCapacity: 1})
 	require.NoError(t, err)
 	mconnClient.SetLogger(log.TestingLogger().With("module", "client"))
 	err = mconnClient.Start()

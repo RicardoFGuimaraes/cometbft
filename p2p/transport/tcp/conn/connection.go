@@ -9,6 +9,7 @@ import (
 	"net"
 	"reflect"
 	"runtime/debug"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -75,12 +76,9 @@ type MConnection struct {
 	recvMonitor   *flow.Monitor
 	send          chan struct{}
 	pong          chan struct{}
-	channels      []*Channel
 	channelsIdx   map[byte]*Channel
-	// streamID -> list of messages
-	recvMsgsByStreamID map[byte]chan []byte
-	errorCh            chan error
-	config             MConnConfig
+	errorCh       chan error
+	config        MConnConfig
 
 	// Closing quitSendRoutine will cause the sendRoutine to eventually quit.
 	// doneSendRoutine is closed when the sendRoutine actually quits.
@@ -106,6 +104,10 @@ type MConnection struct {
 	created time.Time // time of creation
 
 	_maxPacketMsgSize int
+
+	mtx sync.RWMutex
+	// streamID -> list of messages
+	recvMsgsByStreamID map[byte]chan []byte
 }
 
 var _ abstract.Connection = (*MConnection)(nil)
@@ -130,8 +132,6 @@ type MConnConfig struct {
 	// Fuzz connection
 	TestFuzz       bool                   `mapstructure:"test_fuzz"`
 	TestFuzzConfig *config.FuzzConnConfig `mapstructure:"test_fuzz_config"`
-
-	ChannelDescs []ChannelDescriptor `mapstructure:"stream_descs"`
 }
 
 // DefaultMConnConfig returns the default config.
@@ -164,21 +164,8 @@ func NewMConnection(conn net.Conn, config MConnConfig) *MConnection {
 		errorCh:            make(chan error, 1),
 		config:             config,
 		created:            time.Now(),
+		channelsIdx:        make(map[byte]*Channel),
 	}
-
-	// Create channels
-	channelsIdx := map[byte]*Channel{}
-	channels := []*Channel{}
-
-	for _, desc := range config.ChannelDescs {
-		channel := newChannel(mconn, desc)
-		channelsIdx[channel.desc.ID] = channel
-		channels = append(channels, channel)
-
-		mconn.recvMsgsByStreamID[desc.ID] = make(chan []byte, maxRecvChanCap)
-	}
-	mconn.channels = channels
-	mconn.channelsIdx = channelsIdx
 
 	mconn.BaseService = *service.NewBaseService(nil, "MConnection", mconn)
 
@@ -190,8 +177,8 @@ func NewMConnection(conn net.Conn, config MConnConfig) *MConnection {
 
 func (c *MConnection) SetLogger(l log.Logger) {
 	c.BaseService.SetLogger(l)
-	for _, ch := range c.channels {
-		ch.SetLogger(l)
+	for _, ch := range c.channelsIdx {
+		ch.SetLogger(l.With("streamID", ch.desc.ID))
 	}
 }
 
@@ -274,7 +261,25 @@ func (c *MConnection) RemoteAddr() net.Addr {
 	return c.conn.RemoteAddr()
 }
 
-func (c *MConnection) OpenStream(streamID byte) (abstract.Stream, error) {
+func (c *MConnection) OpenStream(streamID byte, desc any) (abstract.Stream, error) {
+	if _, ok := c.channelsIdx[streamID]; ok {
+		return nil, fmt.Errorf("stream %X already exists", streamID)
+	}
+
+	d := ChannelDescriptor{
+		ID:       streamID,
+		Priority: 1,
+	}
+	if desc, ok := desc.(ChannelDescriptor); ok {
+		d = desc
+	}
+	c.channelsIdx[streamID] = newChannel(c, d)
+	c.channelsIdx[streamID].SetLogger(c.Logger.With("streamID", streamID))
+
+	c.mtx.Lock()
+	c.recvMsgsByStreamID[streamID] = make(chan []byte, maxRecvChanCap)
+	c.mtx.Unlock()
+
 	return &MConnectionStream{conn: c, streadID: streamID}, nil
 }
 
@@ -323,8 +328,9 @@ func (c *MConnection) ConnectionState() any {
 	status.Duration = time.Since(c.created)
 	status.SendMonitor = c.sendMonitor.Status()
 	status.RecvMonitor = c.recvMonitor.Status()
-	status.Channels = make([]ChannelStatus, len(c.channels))
-	for i, channel := range c.channels {
+	status.Channels = make([]ChannelStatus, len(c.channelsIdx))
+	i := 0
+	for _, channel := range c.channelsIdx {
 		status.Channels[i] = ChannelStatus{
 			ID:                channel.desc.ID,
 			SendQueueCapacity: cap(channel.sendQueue),
@@ -332,6 +338,7 @@ func (c *MConnection) ConnectionState() any {
 			Priority:          channel.desc.Priority,
 			RecentlySent:      atomic.LoadInt64(&channel.recentlySent),
 		}
+		i++
 	}
 	return status
 }
@@ -376,7 +383,10 @@ func (c *MConnection) sendBytes(chID byte, msgBytes []byte, timeout time.Duratio
 		"msgBytes", log.NewLazySprintf("%X", msgBytes),
 		"timeout", timeout)
 
-	channel := c.channelsIdx[chID]
+	channel, ok := c.channelsIdx[chID]
+	if !ok {
+		panic(fmt.Sprintf("Unknown channel %X. Forgot to register?", chID))
+	}
 	if err := channel.sendBytes(msgBytes, timeout); err != nil {
 		c.Logger.Error("Send failed", "err", err)
 		return err
@@ -422,7 +432,7 @@ FOR_LOOP:
 			// something is written to .bufConnWriter.
 			c.flush()
 		case <-c.chStatsTimer.C:
-			for _, channel := range c.channels {
+			for _, channel := range c.channelsIdx {
 				channel.updateStats()
 			}
 		case <-c.pingTimer.C:
@@ -475,7 +485,7 @@ FOR_LOOP:
 			break FOR_LOOP
 		}
 		if err != nil {
-			c.Logger.Error("Connection failed @ sendRoutine", "conn", c, "err", err)
+			c.Logger.Error("Connection failed @ sendRoutine", "err", err)
 			c.stopForError(err)
 			break FOR_LOOP
 		}
@@ -508,7 +518,7 @@ func (c *MConnection) sendBatchPacketMsgs(w protoio.Writer, batchSize int) bool 
 		}
 	}()
 	for i := 0; i < batchSize; i++ {
-		channel := selectChannelToGossipOn(c.channels)
+		channel := selectChannelToGossipOn(c.channelsIdx)
 		// nothing to send across any channel.
 		if channel == nil {
 			return true
@@ -526,12 +536,12 @@ func (c *MConnection) sendBatchPacketMsgs(w protoio.Writer, batchSize int) bool 
 // TODO: Make "batchChannelToGossipOn", so we can do our proto marshaling overheads in parallel,
 // and we can avoid re-checking for `isSendPending`.
 // We can easily mock the recentlySent differences for the batch choosing.
-func selectChannelToGossipOn(channels []*Channel) *Channel {
+func selectChannelToGossipOn(channelsIdx map[byte]*Channel) *Channel {
 	// Choose a channel to create a PacketMsg from.
 	// The chosen channel will be the one whose recentlySent/priority is the least.
 	var leastRatio float32 = math.MaxFloat32
 	var leastChannel *Channel
-	for _, channel := range channels {
+	for _, channel := range channelsIdx {
 		// If nothing to send, skip this channel
 		// TODO: Skip continually looking for isSendPending on channels we've already skipped in this batch-send.
 		if !channel.isSendPending() {
@@ -607,9 +617,9 @@ FOR_LOOP:
 
 			if c.IsRunning() {
 				if errors.Is(err, io.EOF) {
-					c.Logger.Info("Connection is closed @ recvRoutine (likely by the other side)", "conn", c)
+					c.Logger.Info("Connection is closed @ recvRoutine (likely by the other side)")
 				} else {
-					c.Logger.Debug("Connection failed @ recvRoutine (reading byte)", "conn", c, "err", err)
+					c.Logger.Debug("Connection failed @ recvRoutine (reading byte)", "err", err)
 				}
 				c.stopForError(err)
 			}
@@ -639,7 +649,7 @@ FOR_LOOP:
 			channel, ok := c.channelsIdx[channelID]
 			if pkt.PacketMsg.ChannelID < 0 || pkt.PacketMsg.ChannelID > math.MaxUint8 || !ok || channel == nil {
 				err := fmt.Errorf("unknown channel %X", pkt.PacketMsg.ChannelID)
-				c.Logger.Debug("Connection failed @ recvRoutine", "conn", c, "err", err)
+				c.Logger.Debug("Connection failed @ recvRoutine", "err", err)
 				c.stopForError(err)
 				break FOR_LOOP
 			}
@@ -647,18 +657,21 @@ FOR_LOOP:
 			msgBytes, err := channel.recvPacketMsg(*pkt.PacketMsg)
 			if err != nil {
 				if c.IsRunning() {
-					c.Logger.Debug("Connection failed @ recvRoutine", "conn", c, "err", err)
+					c.Logger.Debug("Connection failed @ recvRoutine", "err", err)
 					c.stopForError(err)
 				}
 				break FOR_LOOP
 			}
 			if msgBytes != nil {
-				c.Logger.Debug("Received bytes", "streamID", channelID, "bytes", msgBytes)
-				c.pushRecvMsg(channelID, msgBytes)
+				c.Logger.Debug("Received", "streamID", channelID, "msgBytes", log.NewLazySprintf("%X", msgBytes))
+				if err := c.pushRecvMsg(channelID, msgBytes); err != nil {
+					c.Logger.Error("Failed to store msgBytes", "streamID", channelID,
+						"msgBytes", log.NewLazySprintf("%X", msgBytes), "err", err)
+				}
 			}
 		default:
 			err := fmt.Errorf("unknown message type %v", reflect.TypeOf(packet))
-			c.Logger.Error("Connection failed @ recvRoutine", "conn", c, "err", err)
+			c.Logger.Error("Connection failed @ recvRoutine", "err", err)
 			c.stopForError(err)
 			break FOR_LOOP
 		}
@@ -668,22 +681,23 @@ FOR_LOOP:
 	close(c.pong)
 }
 
-func (c *MConnection) pushRecvMsg(streamID byte, msgBytes []byte) {
-	// Init.
-	_, ok := c.recvMsgsByStreamID[streamID]
-	if !ok {
-		c.Logger.Error("Unknown stream", "streamID", streamID)
-		return
-	}
+func (c *MConnection) pushRecvMsg(streamID byte, msgBytes []byte) error {
+	c.mtx.RLock()
+	ch, ok := c.recvMsgsByStreamID[streamID]
+	c.mtx.RUnlock()
 
-	// Drop the message if the buffer is full.
-	if len(c.recvMsgsByStreamID[streamID]) >= maxRecvChanCap {
-		c.Logger.Error("Receive buffer is full. No one is reading from this stream", "streamID", streamID, "max", maxRecvChanCap)
-		return
+	// Init.
+	if !ok {
+		return fmt.Errorf("unknown stream %X", streamID)
 	}
 
 	// Push the message.
-	c.recvMsgsByStreamID[streamID] <- msgBytes
+	select {
+	case ch <- msgBytes:
+		return nil
+	default: // Drop the message if the buffer is full.
+		return fmt.Errorf("receive buffer is full for stream %X", streamID)
+	}
 }
 
 // not goroutine-safe.
@@ -836,7 +850,6 @@ func (ch *Channel) writePacketMsgTo(w protoio.Writer) (n int, err error) {
 // complete. NOTE message bytes may change on next call to recvPacketMsg.
 // Not goroutine-safe.
 func (ch *Channel) recvPacketMsg(packet tmp2p.PacketMsg) ([]byte, error) {
-	ch.Logger.Debug("Read PacketMsg", "conn", ch.conn, "packet", packet)
 	recvCap, recvReceived := ch.desc.RecvMessageCapacity, len(ch.recving)+len(packet.Data)
 	if recvCap < recvReceived {
 		return nil, ErrPacketTooBig{Max: recvCap, Received: recvReceived}

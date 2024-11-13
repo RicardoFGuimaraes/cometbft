@@ -24,6 +24,8 @@ import (
 	tcpconn "github.com/cometbft/cometbft/p2p/transport/tcp/conn"
 )
 
+const testCh = 0x01
+
 func TestPeerBasic(t *testing.T) {
 	rp := &remoteTCPPeer{PrivKey: ed25519.GenPrivKey(), Config: cfg}
 	rp.Start()
@@ -84,7 +86,7 @@ func createOutboundPeerAndPerformHandshake(
 	pc, err := testOutboundPeerConn(addr, config, false)
 	require.NoError(t, err)
 
-	stream, err := pc.OpenStream(handshakeStreamID)
+	stream, err := pc.OpenStream(abstract.HandshakeStreamID, nil)
 	require.NoError(t, err)
 	defer stream.Close()
 
@@ -197,7 +199,7 @@ func (rp *remoteTCPPeer) Dial(addr *na.NetAddr) (abstract.Connection, error) {
 		return nil, err
 	}
 
-	stream, err := pc.OpenStream(handshakeStreamID)
+	stream, err := pc.OpenStream(abstract.HandshakeStreamID, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -231,7 +233,7 @@ func (rp *remoteTCPPeer) accept() {
 			golog.Fatalf("Failed to create a peer: %+v", err)
 		}
 
-		stream, err := conn.OpenStream(handshakeStreamID)
+		stream, err := conn.OpenStream(abstract.HandshakeStreamID, nil)
 		if err != nil {
 			_ = pc.Close(err.Error())
 			golog.Fatalf("Failed to open the handshake stream: %+v", err)

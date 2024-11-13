@@ -9,8 +9,9 @@ import (
 // Connection is a multiplexed connection that can send and receive data
 // on multiple streams.
 type Connection interface {
-	// OpenStream opens a new stream on the connection.
-	OpenStream(streamID byte) (Stream, error)
+	// OpenStream opens a new stream on the connection with an optional
+	// description.
+	OpenStream(streamID byte, desc any) (Stream, error)
 
 	// LocalAddr returns the local network address, if known.
 	LocalAddr() net.Addr

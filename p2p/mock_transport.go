@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/cometbft/cometbft/p2p/abstract"
-	na "github.com/cometbft/cometbft/p2p/netaddr"
 )
 
 type mockStream struct {
@@ -40,7 +39,7 @@ func newMockConnection(c net.Conn) *mockConnection {
 	}
 }
 
-func (c mockConnection) OpenStream(byte) (abstract.Stream, error) {
+func (c mockConnection) OpenStream(byte, any) (abstract.Stream, error) {
 	return &mockStream{
 		Conn: c.Conn,
 	}, nil
@@ -66,40 +65,3 @@ func (c mockConnection) ConnectionState() any {
 		connectedFor: time.Since(c.connectedAt),
 	}
 }
-
-var _ abstract.Transport = (*mockTransport)(nil)
-
-type mockTransport struct {
-	ln   net.Listener
-	addr na.NetAddr
-}
-
-func (t *mockTransport) Listen(addr na.NetAddr) error {
-	ln, err := net.Listen("tcp", addr.DialString())
-	if err != nil {
-		return err
-	}
-	t.addr = addr
-	t.ln = ln
-	return nil
-}
-
-func (t *mockTransport) NetAddr() na.NetAddr {
-	return t.addr
-}
-
-func (t *mockTransport) Accept() (abstract.Connection, *na.NetAddr, error) {
-	c, err := t.ln.Accept()
-	return newMockConnection(c), nil, err
-}
-
-func (*mockTransport) Dial(addr na.NetAddr) (abstract.Connection, error) {
-	c, err := addr.DialTimeout(time.Second)
-	return newMockConnection(c), err
-}
-
-func (*mockTransport) Cleanup(abstract.Connection) error {
-	return nil
-}
-
-func (*mockTransport) UpdateStreamDescriptors([]abstract.StreamDescriptor) {}

@@ -109,7 +109,7 @@ type mockConnection struct {
 	net.Conn
 }
 
-func (c mockConnection) OpenStream(byte) (abstract.Stream, error) {
+func (c mockConnection) OpenStream(byte, any) (abstract.Stream, error) {
 	return mockStream(c), nil
 }
 

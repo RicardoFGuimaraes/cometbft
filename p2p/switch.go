@@ -33,8 +33,6 @@ const (
 	reconnectBackOffBaseSeconds = 3
 
 	defaultFilterTimeout = 5 * time.Second
-
-	handshakeStreamID = 0x00
 )
 
 // -----------------------------------------------------------------------------
@@ -151,23 +149,8 @@ func WithMetrics(metrics *Metrics) SwitchOption {
 // NOTE: Not goroutine safe.
 func (sw *Switch) AddReactor(name string, reactor Reactor) Reactor {
 	for _, streamDesc := range reactor.StreamDescriptors() {
-		streamID := streamDesc.StreamID()
-
-		// No two reactors can share the same channel.
-		if _, ok := sw.streamInfoByStreamID[streamID]; ok {
-			panic(fmt.Sprintf("stream %X has multiple reactors %v & %v",
-				streamID, sw.streamInfoByStreamID[streamID].reactor, reactor))
-		}
-
-		sw.streamInfoByStreamID[streamID] = streamInfo{reactor: reactor, msgType: streamDesc.MessageType()}
+		sw.streamInfoByStreamID[streamDesc.StreamID()] = streamInfo{reactor: reactor, msgType: streamDesc.MessageType()}
 	}
-
-	// Update the transport with the new stream descriptors.
-	descs := make([]abstract.StreamDescriptor, 0)
-	for _, info := range sw.streamInfoByStreamID {
-		descs = append(descs, info.reactor.StreamDescriptors()...)
-	}
-	sw.transport.UpdateStreamDescriptors(descs)
 
 	sw.reactors[name] = reactor
 	reactor.SetSwitch(sw)
@@ -180,13 +163,6 @@ func (sw *Switch) RemoveReactor(name string, reactor Reactor) {
 	for _, streamDesc := range reactor.StreamDescriptors() {
 		delete(sw.streamInfoByStreamID, streamDesc.StreamID())
 	}
-
-	// Update the transport with the new stream descriptors.
-	descs := make([]abstract.StreamDescriptor, 0)
-	for _, info := range sw.streamInfoByStreamID {
-		descs = append(descs, info.reactor.StreamDescriptors()...)
-	}
-	sw.transport.UpdateStreamDescriptors(descs)
 
 	delete(sw.reactors, name)
 	reactor.SetSwitch(nil)
@@ -665,7 +641,7 @@ func (sw *Switch) acceptRoutine() {
 			break
 		}
 
-		stream, err := conn.OpenStream(handshakeStreamID)
+		stream, err := conn.OpenStream(abstract.HandshakeStreamID, nil)
 		if err != nil {
 			_ = sw.transport.Cleanup(conn)
 			continue
@@ -766,7 +742,7 @@ func (sw *Switch) addOutboundPeerWithConfig(
 		return err
 	}
 
-	stream, err := conn.OpenStream(handshakeStreamID)
+	stream, err := conn.OpenStream(abstract.HandshakeStreamID, nil)
 	if err != nil {
 		_ = sw.transport.Cleanup(conn)
 		return err
