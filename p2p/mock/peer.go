@@ -123,3 +123,4 @@ func (c mockConnection) RemoteAddr() net.Addr {
 func (c mockConnection) Close(string) error         { return c.Conn.Close() }
 func (c mockConnection) FlushAndClose(string) error { return c.Conn.Close() }
 func (mockConnection) ConnectionState() any         { return nil }
+func (mockConnection) ErrorCh() <-chan error        { return nil }

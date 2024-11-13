@@ -286,6 +286,18 @@ func (p *peer) OnStart() error {
 	go p.readLoop()
 	go p.metricsReporter()
 
+	// Handle connection errors.
+	go func() {
+		select {
+		case <-p.Quit():
+			return
+		case err := <-p.Connection.ErrorCh():
+			p.Logger.Error("Connection error", "err", err)
+			p.onPeerError(p, err)
+			return
+		}
+	}()
+
 	return nil
 }
 

@@ -285,13 +285,36 @@ func (c *MConnection) OpenStream(streamID byte, desc any) (abstract.Stream, erro
 	return &MConnectionStream{conn: c, streadID: streamID}, nil
 }
 
-func (c *MConnection) Close(string) error {
-	return c.Stop()
+func (c *MConnection) Close(reason string) error {
+	// inform the error channel that we are shutting down.
+	select {
+	case c.errorCh <- fmt.Errorf("Close called (reason: %s)", reason):
+	default:
+	}
+
+	if c.stopServices() {
+		return nil
+	}
+
+	// We can't close pong safely here because
+	// recvRoutine may write to it after we've stopped.
+	// Though it doesn't need to get closed at all,
+	// we close it @ recvRoutine.
+
+	// c.Stop()
+
+	return c.conn.Close()
 }
 
 // FlushAndClose replicates the logic of OnStop. It additionally ensures that
 // all successful writes will get flushed before closing the connection.
-func (c *MConnection) FlushAndClose(string) error {
+func (c *MConnection) FlushAndClose(reason string) error {
+	// inform the error channel that we are shutting down.
+	select {
+	case c.errorCh <- fmt.Errorf("FlushAndClose called (reason: %s)", reason):
+	default:
+	}
+
 	if c.stopServices() {
 		return nil
 	}
@@ -368,12 +391,13 @@ func (c *MConnection) _recover() {
 }
 
 func (c *MConnection) stopForError(r error) {
-	if err := c.Stop(); err != nil {
-		c.Logger.Error("Error stopping connection", "err", err)
-	}
 	select {
 	case c.errorCh <- r:
 	default:
+	}
+
+	if err := c.Stop(); err != nil {
+		c.Logger.Error("Error stopping connection", "err", err)
 	}
 }
 

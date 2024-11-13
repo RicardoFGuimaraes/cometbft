@@ -404,18 +404,10 @@ func assertNoPeersAfterTimeout(t *testing.T, sw *Switch, timeout time.Duration) 
 }
 
 func TestSwitchStopsNonPersistentPeerOnError(t *testing.T) {
-	assert, require := assert.New(t), require.New(t)
-
 	sw := MakeSwitch(cfg, 1, initSwitchFunc)
 	err := sw.Start()
-	if err != nil {
-		t.Error(err)
-	}
-	t.Cleanup(func() {
-		if err := sw.Stop(); err != nil {
-			t.Error(err)
-		}
-	})
+	require.NoError(t, err)
+	defer sw.Stop() //nolint:errcheck
 
 	// simulate remote peer
 	rp := newRemoteTCPPeer()
@@ -423,7 +415,7 @@ func TestSwitchStopsNonPersistentPeerOnError(t *testing.T) {
 	defer rp.Stop()
 
 	conn, err := sw.transport.Dial(*rp.Addr())
-	require.NoError(err)
+	require.NoError(t, err)
 
 	p := wrapPeer(conn,
 		rp.nodeInfo(),
@@ -437,16 +429,16 @@ func TestSwitchStopsNonPersistentPeerOnError(t *testing.T) {
 		rp.Addr())
 
 	err = sw.addPeer(p)
-	require.NoError(err)
+	require.NoError(t, err)
 
-	require.NotNil(sw.Peers().Get(rp.ID()))
+	require.NotNil(t, sw.Peers().Get(rp.ID()))
 
 	// simulate failure by closing connection
-	err = p.(*peer).Conn().Close("some error")
-	require.NoError(err)
+	err = p.Conn().Close("simulate failure")
+	require.NoError(t, err)
 
 	assertNoPeersAfterTimeout(t, sw, 100*time.Millisecond)
-	assert.False(p.IsRunning())
+	assert.False(t, p.IsRunning())
 }
 
 func TestSwitchStopPeerForError(t *testing.T) {
@@ -572,8 +564,8 @@ func TestSwitchReconnectsToInboundPersistentPeer(t *testing.T) {
 	require.NoError(t, err)
 	time.Sleep(50 * time.Millisecond)
 	require.NotNil(t, sw.Peers().Get(rp.ID()))
-
-	conn.Close("simulate failure")
+	err = conn.Close("simulate failure")
+	require.NoError(t, err)
 
 	waitUntilSwitchHasAtLeastNPeers(sw, 1)
 	assert.Equal(t, 1, sw.Peers().Size())
@@ -991,6 +983,7 @@ func (rp *remoteTCPPeer) Dial(addr *na.NetAddr) (abstract.Connection, error) {
 func (rp *remoteTCPPeer) nodeInfo() ni.NodeInfo {
 	la := rp.Addr()
 	nodeInfo := testNodeInfo(rp.ID(), "remote_peer_"+la.String())
+	nodeInfo.ListenAddr = la.DialString()
 	nodeInfo.Channels = []byte{testCh}
 	return nodeInfo
 }

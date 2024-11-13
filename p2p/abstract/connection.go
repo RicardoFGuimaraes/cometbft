@@ -32,6 +32,9 @@ type Connection interface {
 	// ConnectionState returns basic details about the connection.
 	// Warning: This API should not be considered stable and might change soon.
 	ConnectionState() any
+
+	// ErrorCh returns a channel that is closed when an error occurs.
+	ErrorCh() <-chan error
 }
 
 // Stream is the interface implemented by QUIC streams or multiplexed TCP connection.
