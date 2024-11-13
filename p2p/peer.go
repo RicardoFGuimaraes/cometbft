@@ -189,7 +189,7 @@ func newPeer(
 	return p
 }
 
-func (p *peer) readLoop() {
+func (p *peer) readLoop(streamID byte, stream abstract.Stream) {
 	defer func() {
 		if r := recover(); r != nil {
 			p.Logger.Error("Peer panicked", "err", r, "stack", string(debug.Stack()))
@@ -198,51 +198,49 @@ func (p *peer) readLoop() {
 	}()
 
 	for {
-		select {
-		case <-p.Quit():
+		if !p.IsRunning() {
 			return
-		default:
-			// TODO: establish priority for reading from streams (consensus -> evidence -> mempool).
-			for streamID, stream := range p.streams {
-				buf := make([]byte, 10000) // TODO max msg size for this stream
-				n, err := stream.Read(buf)
-				if (n == 0 && err == nil) || errors.Is(err, io.EOF) {
-					continue
-				}
-				if err != nil {
-					p.Logger.Error("Error reading from stream", "stream", streamID, "err", err)
-					p.onPeerError(p, err)
-					return
-				}
+		}
 
-				msgType := p.streamInfoByStreamID[streamID].msgType
-				msg := proto.Clone(msgType)
-				err = proto.Unmarshal(buf[:n], msg)
-				if err != nil {
-					p.Logger.Error("Error unmarshaling message", "as", reflect.TypeOf(msgType), "err", err)
-					p.onPeerError(p, err)
-					return
-				}
+		buf := make([]byte, 1024) // TODO max msg size for this stream
+		n, err := stream.Read(buf)
+		if (n == 0 && err == nil) || errors.Is(err, io.EOF) {
+			continue
+		}
+		if err != nil {
+			p.Logger.Error("Error reading from stream", "stream", streamID, "err", err)
+			p.onPeerError(p, err)
+			return
+		}
 
-				if w, ok := msg.(types.Unwrapper); ok {
-					msg, err = w.Unwrap()
-					if err != nil {
-						p.Logger.Error("Error uwrapping message", "err", err)
-						p.onPeerError(p, err)
-						return
-					}
-				}
+		msgType := p.streamInfoByStreamID[streamID].msgType
+		msg := proto.Clone(msgType)
+		err = proto.Unmarshal(buf[:n], msg)
+		if err != nil {
+			p.Logger.Error("Error unmarshaling message", "as", reflect.TypeOf(msgType), "err", err)
+			p.onPeerError(p, err)
+			return
+		}
 
-				p.Logger.Debug("Received message", "stream", streamID, "msg", msg)
-				p.pendingMetrics.AddPendingRecvBytes(getMsgType(msg), n)
-				reactor := p.streamInfoByStreamID[streamID].reactor
-				reactor.Receive(Envelope{
-					ChannelID: streamID,
-					Src:       p,
-					Message:   msg,
-				})
+		if w, ok := msg.(types.Unwrapper); ok {
+			msg, err = w.Unwrap()
+			if err != nil {
+				p.Logger.Error("Error uwrapping message", "err", err)
+				p.onPeerError(p, err)
+				return
 			}
 		}
+
+		p.Logger.Debug("Received message", "stream", streamID, "msg", msg)
+
+		p.pendingMetrics.AddPendingRecvBytes(getMsgType(msg), n)
+
+		reactor := p.streamInfoByStreamID[streamID].reactor
+		reactor.Receive(Envelope{
+			ChannelID: streamID,
+			Src:       p,
+			Message:   msg,
+		})
 	}
 }
 
@@ -283,7 +281,11 @@ func (p *peer) OnStart() error {
 		p.streams[streamID] = stream
 	}
 
-	go p.readLoop()
+	// TODO: establish priority for reading from streams (consensus -> evidence -> mempool).
+	for streamID, stream := range p.streams {
+		go p.readLoop(streamID, stream)
+	}
+
 	go p.metricsReporter()
 
 	// Handle connection errors.
