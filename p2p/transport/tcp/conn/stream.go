@@ -1,6 +1,7 @@
 package conn
 
 import (
+	"sync"
 	"time"
 )
 
@@ -10,6 +11,7 @@ type MConnectionStream struct {
 	streadID    byte
 	unreadBytes []byte
 
+	mtx           sync.RWMutex
 	deadline      time.Time
 	readDeadline  time.Time
 	writeDeadline time.Time
@@ -17,6 +19,7 @@ type MConnectionStream struct {
 
 // Read reads whole messages from the internal map, which is populated by the
 // global read loop.
+// thread-safe.
 func (s *MConnectionStream) Read(b []byte) (n int, err error) {
 	// If there are unread bytes, read them first.
 	if len(s.unreadBytes) > 0 {
@@ -64,6 +67,7 @@ func (s *MConnectionStream) Read(b []byte) (n int, err error) {
 
 // Write queues bytes to be sent onto the internal write queue. It returns
 // len(b), but it doesn't guarantee that the Write actually succeeds.
+// thread-safe.
 func (s *MConnectionStream) Write(b []byte) (n int, err error) {
 	if err := s.conn.sendBytes(s.streadID, b, s.writeTimeout()); err != nil {
 		return 0, err
@@ -72,6 +76,7 @@ func (s *MConnectionStream) Write(b []byte) (n int, err error) {
 }
 
 // Close does nothing.
+// thread-safe.
 func (s *MConnectionStream) Close() error {
 	s.conn.mtx.Lock()
 	delete(s.conn.recvMsgsByStreamID, s.streadID)
@@ -85,23 +90,44 @@ func (s *MConnectionStream) Close() error {
 // Conn.Read and Conn.Write will not time out.
 //
 // Only applies to new reads and writes.
-func (s *MConnectionStream) SetDeadline(t time.Time) error { s.deadline = t; return nil }
+// thread-safe.
+func (s *MConnectionStream) SetDeadline(t time.Time) error {
+	s.mtx.Lock()
+	s.deadline = t
+	s.mtx.Unlock()
+	return nil
+}
 
 // SetReadDeadline sets the read deadline for this stream. It does not set the
 // read deadline on the underlying TCP connection! A zero value for t means
 // Conn.Read will not time out.
 //
 // Only applies to new reads.
-func (s *MConnectionStream) SetReadDeadline(t time.Time) error { s.readDeadline = t; return nil }
+// thread-safe.
+func (s *MConnectionStream) SetReadDeadline(t time.Time) error {
+	s.mtx.Lock()
+	s.readDeadline = t
+	s.mtx.Unlock()
+	return nil
+}
 
 // SetWriteDeadline sets the write deadline for this stream. It does not set the
 // write deadline on the underlying TCP connection! A zero value for t means
 // Conn.Write will not time out.
 //
 // Only applies to new writes.
-func (s *MConnectionStream) SetWriteDeadline(t time.Time) error { s.writeDeadline = t; return nil }
+// thread-safe.
+func (s *MConnectionStream) SetWriteDeadline(t time.Time) error {
+	s.mtx.Lock()
+	s.writeDeadline = t
+	s.mtx.Unlock()
+	return nil
+}
 
-func (s MConnectionStream) readTimeout() time.Duration {
+func (s *MConnectionStream) readTimeout() time.Duration {
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+
 	now := time.Now()
 	switch {
 	case s.readDeadline.IsZero() && s.deadline.IsZero():
@@ -114,7 +140,10 @@ func (s MConnectionStream) readTimeout() time.Duration {
 	return 0
 }
 
-func (s MConnectionStream) writeTimeout() time.Duration {
+func (s *MConnectionStream) writeTimeout() time.Duration {
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+
 	now := time.Now()
 	switch {
 	case s.writeDeadline.IsZero() && s.deadline.IsZero():
