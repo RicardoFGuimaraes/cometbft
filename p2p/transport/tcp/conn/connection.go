@@ -64,8 +64,8 @@ const (
 //
 // Connection errors are communicated through the ErrorCh channel.
 //
-// Connection can be closed either by calling Close or FlushAndClose. The
-// latter will flush all pending messages before closing the connection.
+// Connection can be closed either by calling Close. If you need to flush all
+// pending messages before closing the connection, call Flush.
 type MConnection struct {
 	service.BaseService
 
@@ -87,8 +87,7 @@ type MConnection struct {
 	// Closing quitRecvRouting will cause the recvRouting to eventually quit.
 	quitRecvRoutine chan struct{}
 
-	// used to ensure FlushAndClose and OnStop
-	// are safe to call concurrently.
+	// used to ensure Flush and OnStop are safe to call concurrently.
 	stopMtx cmtsync.Mutex
 
 	flushTimer *timer.ThrottleTimer // flush writes as necessary but throttled.
@@ -206,7 +205,7 @@ func (c *MConnection) Conn() net.Conn {
 
 // stopServices stops the BaseService and timers and closes the quitSendRoutine.
 // if the quitSendRoutine was already closed, it returns true, otherwise it returns false.
-// It uses the stopMtx to ensure only one of FlushAndClose and OnStop can do this at a time.
+// It uses the stopMtx to ensure only one of Flush and OnStop can do this at a time.
 func (c *MConnection) stopServices() (alreadyStopped bool) {
 	c.stopMtx.Lock()
 	defer c.stopMtx.Unlock()
@@ -295,44 +294,25 @@ func (c *MConnection) Close(reason string) error {
 	return c.Stop()
 }
 
-// FlushAndClose replicates the logic of OnStop. It additionally ensures that
-// all successful writes will get flushed before closing the connection.
-func (c *MConnection) FlushAndClose(reason string) error {
-	// inform the error channel that we are shutting down.
-	select {
-	case c.errorCh <- fmt.Errorf("FlushAndClose called (reason: %s)", reason):
-	default:
+// Flush flushes all the pending bytes.
+func (c *MConnection) Flush() error {
+	// XXX: Flush can't run concurrently with OnStop.
+	c.stopMtx.Lock()
+	defer c.stopMtx.Unlock()
+
+	// wait until the sendRoutine exits
+	// so we dont race on calling sendSomePacketMsgs
+	<-c.doneSendRoutine
+
+	// Send and flush all pending msgs.
+	// Since sendRoutine has exited, we can call this
+	// safely
+	w := protoio.NewDelimitedWriter(c.bufConnWriter)
+	eof := c.sendSomePacketMsgs(w)
+	for !eof {
+		eof = c.sendSomePacketMsgs(w)
 	}
-
-	if c.stopServices() {
-		return nil
-	}
-
-	// this block is unique to FlushAndClose
-	{
-		// wait until the sendRoutine exits
-		// so we dont race on calling sendSomePacketMsgs
-		<-c.doneSendRoutine
-
-		// Send and flush all pending msgs.
-		// Since sendRoutine has exited, we can call this
-		// safely
-		w := protoio.NewDelimitedWriter(c.bufConnWriter)
-		eof := c.sendSomePacketMsgs(w)
-		for !eof {
-			eof = c.sendSomePacketMsgs(w)
-		}
-		c.flush()
-
-		// Now we can close the connection
-	}
-
-	// We can't close pong safely here because
-	// recvRoutine may write to it after we've stopped.
-	// Though it doesn't need to get closed at all,
-	// we close it @ recvRoutine.
-
-	return c.conn.Close()
+	return c.flush()
 }
 
 func (c *MConnection) ConnectionState() any {
@@ -361,12 +341,8 @@ func (c *MConnection) String() string {
 	return fmt.Sprintf("MConn{%v}", c.conn.RemoteAddr())
 }
 
-func (c *MConnection) flush() {
-	c.Logger.Debug("Flush", "conn", c)
-	err := c.bufConnWriter.Flush()
-	if err != nil {
-		c.Logger.Debug("MConnection flush failed", "err", err)
-	}
+func (c *MConnection) flush() error {
+	return c.bufConnWriter.Flush()
 }
 
 // Catch panics, usually caused by remote disconnects.
@@ -452,7 +428,9 @@ FOR_LOOP:
 		case <-c.flushTimer.Ch:
 			// NOTE: flushTimer.Set() must be called every time
 			// something is written to .bufConnWriter.
-			c.flush()
+			if fErr := c.flush(); fErr != nil {
+				c.Logger.Error("Failed to flush", "err", fErr)
+			}
 		case <-c.chStatsTimer.C:
 			c.mtx.RLock()
 			for _, channel := range c.channelsIdx {
@@ -474,7 +452,9 @@ FOR_LOOP:
 				default:
 				}
 			})
-			c.flush()
+			if fErr := c.flush(); fErr != nil {
+				c.Logger.Error("Failed to flush", "err", fErr)
+			}
 		case timeout := <-c.pongTimeoutCh:
 			if timeout {
 				c.Logger.Debug("Pong timeout")
@@ -490,7 +470,9 @@ FOR_LOOP:
 				break SELECTION
 			}
 			c.sendMonitor.Update(_n)
-			c.flush()
+			if fErr := c.flush(); fErr != nil {
+				c.Logger.Error("Failed to flush", "err", fErr)
+			}
 		case <-c.quitSendRoutine:
 			break FOR_LOOP
 		case <-c.send:

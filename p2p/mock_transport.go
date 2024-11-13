@@ -51,9 +51,9 @@ func (c mockConnection) LocalAddr() net.Addr {
 func (c mockConnection) RemoteAddr() net.Addr {
 	return c.Conn.RemoteAddr()
 }
-func (c mockConnection) Close(string) error         { return c.Conn.Close() }
-func (c mockConnection) FlushAndClose(string) error { return c.Conn.Close() }
-func (mockConnection) ErrorCh() <-chan error        { return nil }
+func (c mockConnection) Close(string) error  { return c.Conn.Close() }
+func (mockConnection) Flush() error          { return nil }
+func (mockConnection) ErrorCh() <-chan error { return nil }
 
 type mockStatus struct {
 	connectedFor time.Duration

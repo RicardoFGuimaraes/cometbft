@@ -24,10 +24,8 @@ type Connection interface {
 	// Any blocked Read operations will be unblocked and return errors.
 	Close(reason string) error
 
-	// FlushAndClose flushes all the pending bytes and close the connection.
-	// If the protocol supports it, a reason will be sent to the remote.
-	// Any blocked Read operations will be unblocked and return errors.
-	FlushAndClose(reason string) error
+	// Flush flushes all the pending bytes.
+	Flush() error
 
 	// ConnectionState returns basic details about the connection.
 	// Warning: This API should not be considered stable and might change soon.

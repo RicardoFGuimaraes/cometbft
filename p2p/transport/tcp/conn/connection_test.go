@@ -37,7 +37,7 @@ func createMConnectionWithSingleStream(t *testing.T, conn net.Conn) (*MConnectio
 	return c, stream.(*MConnectionStream)
 }
 
-func TestMConnection_FlushAndClose(t *testing.T) {
+func TestMConnection_Flush(t *testing.T) {
 	server, client := net.Pipe()
 	defer server.Close()
 	defer client.Close()
@@ -66,7 +66,10 @@ func TestMConnection_FlushAndClose(t *testing.T) {
 	}()
 
 	// stop the conn - it should flush all conns
-	clientConn.FlushAndClose("test error")
+	err = clientConn.Flush()
+	require.NoError(t, err)
+	err = clientConn.Stop()
+	require.NoError(t, err)
 
 	timer := time.NewTimer(3 * time.Second)
 	select {
