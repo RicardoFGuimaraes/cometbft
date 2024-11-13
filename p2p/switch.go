@@ -643,9 +643,9 @@ func (sw *Switch) acceptRoutine() {
 			sw.Logger.Error("Failed to open handshake stream", "err", err)
 			continue
 		}
-		defer stream.Close()
 
 		nodeInfo, err := handshake(sw.nodeInfo, stream, sw.config.HandshakeTimeout)
+		_ = stream.Close()
 		if err != nil {
 			errRejected, ok := err.(ErrRejected)
 			if ok && errRejected.IsSelf() {
@@ -739,9 +739,9 @@ func (sw *Switch) addOutboundPeerWithConfig(
 		sw.Logger.Error("Failed to open handshake stream", "err", err)
 		return err
 	}
-	defer stream.Close()
 
 	nodeInfo, err := handshake(sw.nodeInfo, stream, sw.config.HandshakeTimeout)
+	_ = stream.Close()
 	if err != nil {
 		errRejected, ok := err.(ErrRejected)
 		if ok && errRejected.IsSelf() {
