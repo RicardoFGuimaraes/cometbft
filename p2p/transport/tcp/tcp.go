@@ -210,7 +210,7 @@ func (mt *MultiplexTransport) Listen(addr na.NetAddr) error {
 		ln = netutil.LimitListener(ln, mt.maxIncomingConnections)
 	}
 
-	mt.netAddr = addr
+	mt.netAddr = *na.New(addr.ID, ln.Addr())
 	mt.listener = ln
 
 	go mt.acceptPeers()

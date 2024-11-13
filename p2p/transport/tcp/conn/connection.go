@@ -377,7 +377,7 @@ func (c *MConnection) stopForError(r error) {
 	}
 }
 
-// thread-safe
+// thread-safe.
 func (c *MConnection) sendBytes(chID byte, msgBytes []byte, timeout time.Duration) error {
 	if !c.IsRunning() {
 		return ErrNotRunning
@@ -410,7 +410,7 @@ func (c *MConnection) sendBytes(chID byte, msgBytes []byte, timeout time.Duratio
 // CanSend returns true if you can send more data onto the chID, false
 // otherwise. Use only as a heuristic.
 //
-// thread-safe
+// thread-safe.
 func (c *MConnection) CanSend(chID byte) bool {
 	if !c.IsRunning() {
 		return false

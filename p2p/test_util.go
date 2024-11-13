@@ -277,7 +277,9 @@ func MakeSwitch(
 
 	// reset channels
 	for ch := range sw.streamInfoByStreamID {
-		nodeInfo.Channels = append(nodeInfo.Channels, ch)
+		if ch != 0x01 {
+			nodeInfo.Channels = append(nodeInfo.Channels, ch)
+		}
 	}
 
 	sw.SetNodeInfo(nodeInfo)
@@ -371,7 +373,7 @@ func testNodeInfo(id nodekey.ID, name string) ni.Default {
 		ListenAddr:      fmt.Sprintf("127.0.0.1:%d", getFreePort()),
 		Network:         "testing",
 		Version:         "1.2.3-rc0-deadbeef",
-		Channels:        []byte{},
+		Channels:        []byte{0x01},
 		Moniker:         name,
 		Other: ni.DefaultOther{
 			TxIndex:    "on",

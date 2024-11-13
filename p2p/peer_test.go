@@ -27,7 +27,7 @@ import (
 const testCh = 0x01
 
 func TestPeerBasic(t *testing.T) {
-	rp := &remoteTCPPeer{PrivKey: ed25519.GenPrivKey(), Config: cfg}
+	rp := &remotePeer{PrivKey: ed25519.GenPrivKey(), Config: cfg}
 	rp.Start()
 	defer rp.Stop()
 
@@ -56,7 +56,7 @@ func TestPeerBasic(t *testing.T) {
 func TestPeerSend(t *testing.T) {
 	config := cfg
 
-	rp := &remoteTCPPeer{PrivKey: ed25519.GenPrivKey(), Config: config}
+	rp := &remotePeer{PrivKey: ed25519.GenPrivKey(), Config: config}
 	rp.Start()
 	defer rp.Stop()
 
@@ -155,51 +155,47 @@ func testOutboundPeerConn(addr *na.NetAddr, config *config.P2PConfig, persistent
 	return pc, nil
 }
 
-type remoteTCPPeer struct {
-	PrivKey    crypto.PrivKey
-	Config     *config.P2PConfig
-	addr       *na.NetAddr
-	channels   bytes.HexBytes
-	listenAddr string
-	listener   net.Listener
+type remotePeer struct {
+	PrivKey  crypto.PrivKey
+	Config   *config.P2PConfig
+	addr     *na.NetAddr
+	channels bytes.HexBytes
+	listener net.Listener
 }
 
-func (rp *remoteTCPPeer) Addr() *na.NetAddr {
+func (rp *remotePeer) Addr() *na.NetAddr {
 	return rp.addr
 }
 
-func (rp *remoteTCPPeer) ID() nodekey.ID {
+func (rp *remotePeer) ID() nodekey.ID {
 	return nodekey.PubKeyToID(rp.PrivKey.PubKey())
 }
 
-func (rp *remoteTCPPeer) Start() {
-	if rp.listenAddr == "" {
-		rp.listenAddr = "127.0.0.1:0"
-	}
-
-	l, e := net.Listen("tcp", rp.listenAddr) // any available address
+func (rp *remotePeer) Start() {
+	l, e := net.Listen("tcp", "127.0.0.1:0") // any available address
 	if e != nil {
 		golog.Fatalf("net.Listen tcp :0: %+v", e)
 	}
 	rp.listener = l
+
 	rp.addr = na.New(nodekey.PubKeyToID(rp.PrivKey.PubKey()), l.Addr())
-	if rp.channels == nil {
-		rp.channels = []byte{testCh}
-	}
+
+	rp.channels = []byte{testCh}
+
 	go rp.accept()
 }
 
-func (rp *remoteTCPPeer) Stop() {
+func (rp *remotePeer) Stop() {
 	rp.listener.Close()
 }
 
-func (rp *remoteTCPPeer) Dial(addr *na.NetAddr) (abstract.Connection, error) {
+func (rp *remotePeer) Dial(addr *na.NetAddr) (abstract.Connection, error) {
 	pc, err := testOutboundPeerConn(addr, rp.Config, false)
 	if err != nil {
 		return nil, err
 	}
 
-	stream, err := pc.OpenStream(abstract.HandshakeStreamID, nil)
+	stream, err := pc.OpenStream(HandshakeStreamID, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -212,7 +208,7 @@ func (rp *remoteTCPPeer) Dial(addr *na.NetAddr) (abstract.Connection, error) {
 	return pc, err
 }
 
-func (rp *remoteTCPPeer) accept() {
+func (rp *remotePeer) accept() {
 	conns := []peerConn{}
 
 	for {
@@ -233,7 +229,7 @@ func (rp *remoteTCPPeer) accept() {
 			golog.Fatalf("Failed to create a peer: %+v", err)
 		}
 
-		stream, err := conn.OpenStream(abstract.HandshakeStreamID, nil)
+		stream, err := conn.OpenStream(HandshakeStreamID, nil)
 		if err != nil {
 			_ = pc.Close(err.Error())
 			golog.Fatalf("Failed to open the handshake stream: %+v", err)
@@ -250,7 +246,7 @@ func (rp *remoteTCPPeer) accept() {
 	}
 }
 
-func (rp *remoteTCPPeer) nodeInfo() ni.NodeInfo {
+func (rp *remotePeer) nodeInfo() ni.NodeInfo {
 	la := rp.listener.Addr().String()
 	nodeInfo := testNodeInfo(rp.ID(), "remote_peer_"+la)
 	nodeInfo.ListenAddr = la

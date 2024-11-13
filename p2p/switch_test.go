@@ -1,7 +1,7 @@
 package p2p
 
 import (
-	"bytes"
+	stdbytes "bytes"
 	"context"
 	"errors"
 	"io"
@@ -20,11 +20,15 @@ import (
 
 	p2pproto "github.com/cometbft/cometbft/api/cometbft/p2p/v1"
 	"github.com/cometbft/cometbft/config"
+	"github.com/cometbft/cometbft/crypto"
 	"github.com/cometbft/cometbft/crypto/ed25519"
+	"github.com/cometbft/cometbft/libs/bytes"
 	"github.com/cometbft/cometbft/libs/log"
 	cmtsync "github.com/cometbft/cometbft/libs/sync"
 	"github.com/cometbft/cometbft/p2p/abstract"
 	na "github.com/cometbft/cometbft/p2p/netaddr"
+	ni "github.com/cometbft/cometbft/p2p/nodeinfo"
+	"github.com/cometbft/cometbft/p2p/nodekey"
 	"github.com/cometbft/cometbft/p2p/transport/tcp"
 	tcpconn "github.com/cometbft/cometbft/p2p/transport/tcp/conn"
 )
@@ -203,7 +207,7 @@ func assertMsgReceivedWithTimeout(
 				require.NoError(t, err)
 				wanted, err := proto.Marshal(msg)
 				require.NoError(t, err)
-				if !bytes.Equal(got, wanted) {
+				if !stdbytes.Equal(got, wanted) {
 					t.Fatalf("Unexpected message bytes. Wanted: %v, Got: %v", msg, msgs[0].Contents)
 				}
 				return
@@ -218,7 +222,7 @@ func TestSwitchFiltersOutItself(t *testing.T) {
 	s1 := MakeSwitch(cfg, 1, initSwitchFunc)
 
 	// simulate s1 having a public IP by creating a remote peer with the same ID
-	rp := &remoteTCPPeer{PrivKey: s1.nodeKey.PrivKey, Config: cfg}
+	rp := newRemoteTCPPeer()
 	rp.Start()
 
 	// addr should be rejected in addPeer based on the same ID
@@ -264,7 +268,7 @@ func TestSwitchPeerFilter(t *testing.T) {
 	})
 
 	// simulate remote peer
-	rp := &remoteTCPPeer{PrivKey: ed25519.GenPrivKey(), Config: cfg}
+	rp := newRemoteTCPPeer()
 	rp.Start()
 	t.Cleanup(rp.Stop)
 
@@ -319,7 +323,7 @@ func TestSwitchPeerFilterTimeout(t *testing.T) {
 	})
 
 	// simulate remote peer
-	rp := &remoteTCPPeer{PrivKey: ed25519.GenPrivKey(), Config: cfg}
+	rp := newRemoteTCPPeer()
 	rp.Start()
 	defer rp.Stop()
 
@@ -356,7 +360,7 @@ func TestSwitchPeerFilterDuplicate(t *testing.T) {
 	})
 
 	// simulate remote peer
-	rp := &remoteTCPPeer{PrivKey: ed25519.GenPrivKey(), Config: cfg}
+	rp := newRemoteTCPPeer()
 	rp.Start()
 	defer rp.Stop()
 
@@ -413,7 +417,7 @@ func TestSwitchStopsNonPersistentPeerOnError(t *testing.T) {
 	})
 
 	// simulate remote peer
-	rp := &remoteTCPPeer{PrivKey: ed25519.GenPrivKey(), Config: cfg}
+	rp := newRemoteTCPPeer()
 	rp.Start()
 	defer rp.Stop()
 
@@ -512,7 +516,7 @@ func TestSwitchReconnectsToOutboundPersistentPeer(t *testing.T) {
 	})
 
 	// 1. simulate failure by closing connection
-	rp := &remoteTCPPeer{PrivKey: ed25519.GenPrivKey(), Config: cfg}
+	rp := newRemoteTCPPeer()
 	rp.Start()
 	defer rp.Stop()
 
@@ -532,13 +536,7 @@ func TestSwitchReconnectsToOutboundPersistentPeer(t *testing.T) {
 	assert.Equal(t, 1, sw.Peers().Size()) // new peer instance
 
 	// 2. simulate first time dial failure
-	rp = &remoteTCPPeer{
-		PrivKey: ed25519.GenPrivKey(),
-		Config:  cfg,
-		// Use different interface to prevent duplicate IP filter, this will break
-		// beyond two peers.
-		listenAddr: "127.0.0.1:0",
-	}
+	rp = newRemoteTCPPeer()
 	rp.Start()
 	defer rp.Stop()
 
@@ -562,7 +560,7 @@ func TestSwitchReconnectsToInboundPersistentPeer(t *testing.T) {
 	})
 
 	// 1. simulate failure by closing the connection
-	rp := &remoteTCPPeer{PrivKey: ed25519.GenPrivKey(), Config: cfg}
+	rp := newRemoteTCPPeer()
 	rp.Start()
 	defer rp.Stop()
 
@@ -594,7 +592,7 @@ func TestSwitchDialPeersAsync(t *testing.T) {
 		}
 	})
 
-	rp := &remoteTCPPeer{PrivKey: ed25519.GenPrivKey(), Config: cfg}
+	rp := newRemoteTCPPeer()
 	rp.Start()
 	defer rp.Stop()
 
@@ -643,7 +641,7 @@ func TestSwitchAcceptRoutine(t *testing.T) {
 		unconditionalPeerIDs = make([]string, unconditionalPeersNum)
 	)
 	for i := 0; i < unconditionalPeersNum; i++ {
-		peer := &remoteTCPPeer{PrivKey: ed25519.GenPrivKey(), Config: cfg}
+		peer := newRemoteTCPPeer()
 		peer.Start()
 		unconditionalPeers[i] = peer
 		unconditionalPeerIDs[i] = string(peer.ID())
@@ -666,7 +664,7 @@ func TestSwitchAcceptRoutine(t *testing.T) {
 	// 1. check we connect up to MaxNumInboundPeers
 	peers := make([]*remoteTCPPeer, 0)
 	for i := 0; i < cfg.MaxNumInboundPeers; i++ {
-		peer := &remoteTCPPeer{PrivKey: ed25519.GenPrivKey(), Config: cfg}
+		peer := newRemoteTCPPeer()
 		peers = append(peers, peer)
 		peer.Start()
 		c, err := peer.Dial(sw.NetAddr())
@@ -688,7 +686,7 @@ func TestSwitchAcceptRoutine(t *testing.T) {
 	assert.Equal(t, cfg.MaxNumInboundPeers, sw.Peers().Size())
 
 	// 2. check we close new connections if we already have MaxNumInboundPeers peers
-	peer := &remoteTCPPeer{PrivKey: ed25519.GenPrivKey(), Config: cfg}
+	peer := newRemoteTCPPeer()
 	peer.Start()
 	conn, err := peer.Dial(sw.NetAddr())
 	require.NoError(t, err)
@@ -831,7 +829,7 @@ func TestSwitch_InitPeerIsNotCalledBeforeRemovePeer(t *testing.T) {
 	})
 
 	// add peer
-	rp := &remoteTCPPeer{PrivKey: ed25519.GenPrivKey(), Config: cfg}
+	rp := newRemoteTCPPeer()
 	rp.Start()
 	defer rp.Stop()
 	_, err = rp.Dial(sw.NetAddr())
@@ -920,4 +918,61 @@ func TestSwitchRemovalErr(t *testing.T) {
 	sw2.StopPeerForError(p, errors.New("peer should error"))
 
 	assert.Equal(t, sw2.peers.Add(p).Error(), ErrPeerRemoval{}.Error())
+}
+
+type remoteTCPPeer struct {
+	PrivKey   crypto.PrivKey
+	Config    *config.P2PConfig
+	channels  bytes.HexBytes
+	transport *tcp.MultiplexTransport
+}
+
+func newRemoteTCPPeer() *remoteTCPPeer {
+	privKey := ed25519.GenPrivKey()
+	nodeKey := nodekey.NodeKey{PrivKey: privKey}
+	return &remoteTCPPeer{
+		PrivKey:   privKey,
+		transport: tcp.NewMultiplexTransport(nodeKey, tcpconn.DefaultMConnConfig()),
+	}
+}
+
+func (rp *remoteTCPPeer) Addr() *na.NetAddr {
+	na := rp.transport.NetAddr()
+	return &na
+}
+
+func (rp *remoteTCPPeer) ID() nodekey.ID {
+	return nodekey.PubKeyToID(rp.PrivKey.PubKey())
+}
+
+func (rp *remoteTCPPeer) Start() {
+	id := nodekey.PubKeyToID(rp.PrivKey.PubKey())
+	addr, err := na.NewFromString(string(id) + "@127.0.0.1:0")
+	if err != nil {
+		panic(err)
+	}
+	err = rp.transport.Listen(*addr)
+	if err != nil {
+		panic(err)
+	}
+
+	if rp.channels == nil {
+		rp.channels = []byte{testCh}
+	}
+}
+
+func (rp *remoteTCPPeer) Stop() {
+	rp.transport.Close()
+}
+
+func (rp *remoteTCPPeer) Dial(addr *na.NetAddr) (abstract.Connection, error) {
+	return rp.transport.Dial(*addr)
+}
+
+func (rp *remoteTCPPeer) nodeInfo() ni.NodeInfo {
+	la := rp.Addr()
+	nodeInfo := testNodeInfo(rp.ID(), "remote_peer_"+la.String())
+	nodeInfo.ListenAddr = la.String()
+	nodeInfo.Channels = rp.channels
+	return nodeInfo
 }
