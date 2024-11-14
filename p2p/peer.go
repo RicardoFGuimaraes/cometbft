@@ -238,7 +238,7 @@ func (p *peer) streamReadLoop(streamID byte, stream abstract.Stream) {
 			}
 		}
 
-		logger.Debug("Received message", "msg", msg)
+		logger.Debug("Received message", "msgType", msgType)
 
 		p.pendingMetrics.AddPendingRecvBytes(getMsgType(msg), n)
 
@@ -402,21 +402,23 @@ func (p *peer) send(streamID byte, msg proto.Message, sendFunc func([]byte) (int
 		msg = w.Wrap()
 	}
 
+	sLogger := p.Logger.With("streamID", streamID, "msgType", msgType)
+
 	msgBytes, err := proto.Marshal(msg)
 	if err != nil {
-		p.Logger.Error("Can't marshal msg", "err", err, "msg", msg)
+		sLogger.Error("proto.Marshal", "err", err)
 		return false
 	}
 
 	n, err := sendFunc(msgBytes)
 	if err != nil {
-		p.Logger.Error("Failed to send msg to stream", "err", err, "streamID", streamID, "msg", msg)
+		sLogger.Error("Stream.Write", "err", err)
 		return false
 	} else if n != len(msgBytes) {
-		p.Logger.Error("Message not sent completely", "streamID", streamID, "msg", msg, "n", n, "len", len(msgBytes))
-		return false
+		panic("unimplemented")
 	}
 
+	sLogger.Debug("Sent message")
 	p.pendingMetrics.AddPendingSendBytes(msgType, n)
 	return true
 }

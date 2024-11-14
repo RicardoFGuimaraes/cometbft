@@ -359,10 +359,10 @@ func (c *MConnection) sendBytes(chID byte, msgBytes []byte, timeout time.Duratio
 		return ErrNotRunning
 	}
 
-	c.Logger.Debug("Send",
-		"streamID", chID,
-		"msgBytes", log.NewLazySprintf("%X", msgBytes),
-		"timeout", timeout)
+	// c.Logger.Debug("Send",
+	// 	"streamID", chID,
+	// 	"msgBytes", log.NewLazySprintf("%X", msgBytes),
+	// 	"timeout", timeout)
 
 	c.mtx.RLock()
 	channel, ok := c.channelsIdx[chID]
@@ -663,7 +663,7 @@ FOR_LOOP:
 				break FOR_LOOP
 			}
 			if msgBytes != nil {
-				c.Logger.Debug("Received", "streamID", channelID, "msgBytes", log.NewLazySprintf("%X", msgBytes))
+				// c.Logger.Debug("Received", "streamID", channelID, "msgBytes", log.NewLazySprintf("%X", msgBytes))
 				if err := c.pushRecvMsg(channelID, msgBytes); err != nil {
 					c.Logger.Error("Failed to store msgBytes", "streamID", channelID,
 						"msgBytes", log.NewLazySprintf("%X", msgBytes), "err", err)
