@@ -22,7 +22,6 @@ import (
 	"github.com/cometbft/cometbft/libs/log"
 	"github.com/cometbft/cometbft/libs/protoio"
 	"github.com/cometbft/cometbft/libs/service"
-	cmtsync "github.com/cometbft/cometbft/libs/sync"
 	"github.com/cometbft/cometbft/p2p/abstract"
 )
 
@@ -86,9 +85,6 @@ type MConnection struct {
 
 	// Closing quitRecvRouting will cause the recvRouting to eventually quit.
 	quitRecvRoutine chan struct{}
-
-	// used to ensure Flush and OnStop are safe to call concurrently.
-	stopMtx cmtsync.Mutex
 
 	flushTimer *timer.ThrottleTimer // flush writes as necessary but throttled.
 	pingTimer  *time.Ticker         // send pings periodically
@@ -205,11 +201,7 @@ func (c *MConnection) Conn() net.Conn {
 
 // stopServices stops the BaseService and timers and closes the quitSendRoutine.
 // if the quitSendRoutine was already closed, it returns true, otherwise it returns false.
-// It uses the stopMtx to ensure only one of Flush and OnStop can do this at a time.
 func (c *MConnection) stopServices() (alreadyStopped bool) {
-	c.stopMtx.Lock()
-	defer c.stopMtx.Unlock()
-
 	select {
 	case <-c.quitSendRoutine:
 		// already quit
@@ -237,20 +229,6 @@ func (c *MConnection) stopServices() (alreadyStopped bool) {
 // ErrorCh returns a channel that will receive errors from the connection.
 func (c *MConnection) ErrorCh() <-chan error {
 	return c.errorCh
-}
-
-// OnStop implements BaseService.
-func (c *MConnection) OnStop() {
-	if c.stopServices() {
-		return
-	}
-
-	c.conn.Close()
-
-	// We can't close pong safely here because
-	// recvRoutine may write to it after we've stopped.
-	// Though it doesn't need to get closed at all,
-	// we close it @ recvRoutine.
 }
 
 func (c *MConnection) LocalAddr() net.Addr {
@@ -284,35 +262,57 @@ func (c *MConnection) OpenStream(streamID byte, desc any) (abstract.Stream, erro
 	return &MConnectionStream{conn: c, streadID: streamID}, nil
 }
 
+// Close closes the connection. It flushes all pending writes before closing.
 func (c *MConnection) Close(reason string) error {
+	if err := c.Stop(); err != nil {
+		return err
+	}
+
+	if c.stopServices() {
+		return nil
+	}
+
 	// inform the error channel that we are shutting down.
 	select {
-	case c.errorCh <- fmt.Errorf("Close called (reason: %s)", reason):
+	case c.errorCh <- errors.New(reason):
 	default:
 	}
 
-	return c.Stop()
+	return c.conn.Close()
 }
 
-// Flush flushes all the pending bytes.
-func (c *MConnection) Flush() error {
-	// XXX: Flush can't run concurrently with OnStop.
-	c.stopMtx.Lock()
-	defer c.stopMtx.Unlock()
-
-	// wait until the sendRoutine exits
-	// so we dont race on calling sendSomePacketMsgs
-	<-c.doneSendRoutine
-
-	// Send and flush all pending msgs.
-	// Since sendRoutine has exited, we can call this
-	// safely
-	w := protoio.NewDelimitedWriter(c.bufConnWriter)
-	eof := c.sendSomePacketMsgs(w)
-	for !eof {
-		eof = c.sendSomePacketMsgs(w)
+func (c *MConnection) FlushAndClose(reason string) error {
+	if err := c.Stop(); err != nil {
+		return err
 	}
-	return c.flush()
+
+	if c.stopServices() {
+		return nil
+	}
+
+	// inform the error channel that we are shutting down.
+	select {
+	case c.errorCh <- errors.New(reason):
+	default:
+	}
+
+	// flush all pending writes
+	{
+		// wait until the sendRoutine exits
+		// so we dont race on calling sendSomePacketMsgs
+		<-c.doneSendRoutine
+		// Send and flush all pending msgs.
+		// Since sendRoutine has exited, we can call this
+		// safely
+		w := protoio.NewDelimitedWriter(c.bufConnWriter)
+		eof := c.sendBatchPacketMsgs(w, numBatchPacketMsgs)
+		for !eof {
+			eof = c.sendBatchPacketMsgs(w, numBatchPacketMsgs)
+		}
+		_ = c.flush()
+	}
+
+	return c.conn.Close()
 }
 
 func (c *MConnection) ConnectionState() any {
@@ -349,18 +349,7 @@ func (c *MConnection) flush() error {
 func (c *MConnection) _recover() {
 	if r := recover(); r != nil {
 		c.Logger.Error("MConnection panicked", "err", r, "stack", string(debug.Stack()))
-		c.stopForError(fmt.Errorf("recovered from panic: %v", r))
-	}
-}
-
-func (c *MConnection) stopForError(r error) {
-	select {
-	case c.errorCh <- r:
-	default:
-	}
-
-	if err := c.Stop(); err != nil {
-		c.Logger.Error("Error stopping connection", "err", err)
+		c.Close(fmt.Sprintf("recovered from panic: %v", r))
 	}
 }
 
@@ -492,7 +481,7 @@ FOR_LOOP:
 		}
 		if err != nil {
 			c.Logger.Error("Connection failed @ sendRoutine", "err", err)
-			c.stopForError(err)
+			c.Close(err.Error())
 			break FOR_LOOP
 		}
 	}
@@ -574,7 +563,7 @@ func (c *MConnection) sendPacketMsgOnChannel(w protoio.Writer, sendChannel *Chan
 	n, err := sendChannel.writePacketMsgTo(w)
 	if err != nil {
 		c.Logger.Error("Failed to write PacketMsg", "err", err)
-		c.stopForError(err)
+		c.Close(err.Error())
 		return n, true
 	}
 	// TODO: Change this to only add flush signals at the start and end of the batch.
@@ -630,7 +619,7 @@ FOR_LOOP:
 				} else {
 					c.Logger.Debug("Connection failed @ recvRoutine (reading byte)", "err", err)
 				}
-				c.stopForError(err)
+				c.Close(err.Error())
 			}
 			break FOR_LOOP
 		}
@@ -661,7 +650,7 @@ FOR_LOOP:
 			if pkt.PacketMsg.ChannelID < 0 || pkt.PacketMsg.ChannelID > math.MaxUint8 || !ok || channel == nil {
 				err := fmt.Errorf("unknown channel %X", pkt.PacketMsg.ChannelID)
 				c.Logger.Debug("Connection failed @ recvRoutine", "err", err)
-				c.stopForError(err)
+				c.Close(err.Error())
 				break FOR_LOOP
 			}
 
@@ -669,7 +658,7 @@ FOR_LOOP:
 			if err != nil {
 				if c.IsRunning() {
 					c.Logger.Debug("Connection failed @ recvRoutine", "err", err)
-					c.stopForError(err)
+					c.Close(err.Error())
 				}
 				break FOR_LOOP
 			}
@@ -683,7 +672,7 @@ FOR_LOOP:
 		default:
 			err := fmt.Errorf("unknown message type %v", reflect.TypeOf(packet))
 			c.Logger.Error("Connection failed @ recvRoutine", "err", err)
-			c.stopForError(err)
+			c.Close(err.Error())
 			break FOR_LOOP
 		}
 	}

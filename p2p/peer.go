@@ -314,10 +314,7 @@ func (p *peer) OnStart() error {
 //
 // NOTE: it is not safe to call this method more than once.
 func (p *peer) FlushStop() {
-	if err := p.Flush(); err != nil {
-		p.Logger.Error("Flush error", "err", err)
-	}
-	if err := p.Close("stopping peer"); err != nil {
+	if err := p.FlushAndClose("stopping peer"); err != nil {
 		p.Logger.Error("Close", "err", err)
 	}
 }
