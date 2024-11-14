@@ -81,7 +81,7 @@ func TestMConnection_StreamWrite(t *testing.T) {
 	mconn, clientStream := createMConnectionWithSingleStream(t, client)
 	err := mconn.Start()
 	require.NoError(t, err)
-	defer mconn.Close("normal") //nolint:errcheck // ignore for tests
+	defer mconn.Close("normal")
 
 	msg := []byte("Ant-Man")
 	_, err = clientStream.Write(msg)
@@ -109,12 +109,12 @@ func TestMConnection_StreamReadWrite(t *testing.T) {
 	mconn1, stream1 := createMConnectionWithSingleStream(t, client)
 	err := mconn1.Start()
 	require.NoError(t, err)
-	defer mconn1.Close("normal") //nolint:errcheck // ignore for tests
+	defer mconn1.Close("normal")
 
 	mconn2, stream2 := createMConnectionWithSingleStream(t, server)
 	err = mconn2.Start()
 	require.NoError(t, err)
-	defer mconn2.Close("normal") //nolint:errcheck // ignore for tests
+	defer mconn2.Close("normal")
 
 	// => write
 	msg := []byte("Cyclops")
@@ -137,7 +137,7 @@ func TestMConnectionStatus(t *testing.T) {
 	mconn, _ := createMConnectionWithSingleStream(t, client)
 	err := mconn.Start()
 	require.NoError(t, err)
-	defer mconn.Close("normal") //nolint:errcheck // ignore for tests
+	defer mconn.Close("normal")
 
 	state := mconn.ConnectionState()
 	assert.NotNil(t, state)
@@ -152,7 +152,7 @@ func TestMConnection_PongTimeoutResultsInError(t *testing.T) {
 	mconn, _ := createMConnectionWithSingleStream(t, client)
 	err := mconn.Start()
 	require.NoError(t, err)
-	defer mconn.Close("normal") //nolint:errcheck // ignore for tests
+	defer mconn.Close("normal")
 
 	serverGotPing := make(chan struct{})
 	go func() {
@@ -181,7 +181,7 @@ func TestMConnection_MultiplePongsInTheBeginning(t *testing.T) {
 	mconn, _ := createMConnectionWithSingleStream(t, client)
 	err := mconn.Start()
 	require.NoError(t, err)
-	defer mconn.Close("normal") //nolint:errcheck // ignore for tests
+	defer mconn.Close("normal")
 
 	// sending 3 pongs in a row (abuse)
 	protoWriter := protoio.NewDelimitedWriter(server)
@@ -226,7 +226,7 @@ func TestMConnection_MultiplePings(t *testing.T) {
 	mconn, _ := createMConnectionWithSingleStream(t, client)
 	err := mconn.Start()
 	require.NoError(t, err)
-	defer mconn.Close("normal") //nolint:errcheck // ignore for tests
+	defer mconn.Close("normal")
 
 	// sending 3 pings in a row (abuse)
 	// see https://github.com/tendermint/tendermint/issues/1190
@@ -267,7 +267,7 @@ func TestMConnection_PingPongs(t *testing.T) {
 	mconn, _ := createMConnectionWithSingleStream(t, client)
 	err := mconn.Start()
 	require.NoError(t, err)
-	defer mconn.Close("normal") //nolint:errcheck // ignore for tests
+	defer mconn.Close("normal")
 
 	serverGotPing := make(chan struct{})
 	go func() {
@@ -315,7 +315,7 @@ func TestMConnection_StopsAndReturnsError(t *testing.T) {
 	mconn, _ := createMConnectionWithSingleStream(t, client)
 	err := mconn.Start()
 	require.NoError(t, err)
-	defer mconn.Close("normal") //nolint:errcheck // ignore for tests
+	defer mconn.Close("normal")
 
 	if err := client.Close(); err != nil {
 		t.Error(err)
@@ -385,8 +385,8 @@ func gotError(ch <-chan error) bool {
 
 func TestMConnection_ReadErrorBadEncoding(t *testing.T) {
 	mconnClient, _, mconnServer, _ := newClientAndServerConnsForReadErrors(t)
-	defer mconnClient.Close("normal") //nolint:errcheck // ignore for tests
-	defer mconnServer.Close("normal") //nolint:errcheck // ignore for tests
+	defer mconnClient.Close("normal")
+	defer mconnServer.Close("normal")
 
 	// send badly encoded data
 	client := mconnClient.conn
@@ -398,8 +398,8 @@ func TestMConnection_ReadErrorBadEncoding(t *testing.T) {
 
 func TestMConnection_ReadErrorUnknownChannel(t *testing.T) {
 	mconnClient, _, mconnServer, _ := newClientAndServerConnsForReadErrors(t)
-	defer mconnClient.Close("normal") //nolint:errcheck // ignore for tests
-	defer mconnServer.Close("normal") //nolint:errcheck // ignore for tests
+	defer mconnClient.Close("normal")
+	defer mconnServer.Close("normal")
 
 	msg := []byte("Ant-Man")
 
@@ -419,8 +419,8 @@ func TestMConnection_ReadErrorUnknownChannel(t *testing.T) {
 
 func TestMConnection_ReadErrorLongMessage(t *testing.T) {
 	mconnClient, _, mconnServer, serverStream := newClientAndServerConnsForReadErrors(t)
-	defer mconnClient.Close("normal") //nolint:errcheck // ignore for tests
-	defer mconnServer.Close("normal") //nolint:errcheck // ignore for tests
+	defer mconnClient.Close("normal")
+	defer mconnServer.Close("normal")
 
 	client := mconnClient.conn
 	protoWriter := protoio.NewDelimitedWriter(client)
@@ -451,8 +451,8 @@ func TestMConnection_ReadErrorLongMessage(t *testing.T) {
 
 func TestMConnection_ReadErrorUnknownMsgType(t *testing.T) {
 	mconnClient, _, mconnServer, _ := newClientAndServerConnsForReadErrors(t)
-	defer mconnClient.Close("normal") //nolint:errcheck // ignore for tests
-	defer mconnServer.Close("normal") //nolint:errcheck // ignore for tests
+	defer mconnClient.Close("normal")
+	defer mconnServer.Close("normal")
 
 	// send msg with unknown msg type
 	_, err := protoio.NewDelimitedWriter(mconnClient.conn).WriteMsg(&pbtypes.Header{ChainID: "x"})
@@ -483,8 +483,8 @@ func TestConnVectors(t *testing.T) {
 
 func TestMConnection_ChannelOverflow(t *testing.T) {
 	mconnClient, _, mconnServer, serverStream := newClientAndServerConnsForReadErrors(t)
-	defer mconnClient.Close("normal") //nolint:errcheck // ignore for tests
-	defer mconnServer.Close("normal") //nolint:errcheck // ignore for tests
+	defer mconnClient.Close("normal")
+	defer mconnServer.Close("normal")
 
 	client := mconnClient.conn
 	protoWriter := protoio.NewDelimitedWriter(client)

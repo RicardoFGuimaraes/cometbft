@@ -64,7 +64,7 @@ const (
 // Connection errors are communicated through the ErrorCh channel.
 //
 // Connection can be closed either by calling Close. If you need to flush all
-// pending messages before closing the connection, call Flush.
+// pending messages before closing the connection, call FlushAndClose.
 type MConnection struct {
 	service.BaseService
 
