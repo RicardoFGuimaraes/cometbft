@@ -200,7 +200,7 @@ func (p *peer) streamReadLoop(streamID byte, stream abstract.Stream) {
 	}()
 
 	var (
-		buf     = make([]byte, 1000)
+		buf     = make([]byte, 2000)
 		reactor = p.streamInfoByStreamID[streamID].reactor
 		msgType = p.streamInfoByStreamID[streamID].msgType
 		logger  = p.Logger.With("stream", streamID)
