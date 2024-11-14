@@ -737,6 +737,7 @@ func (sw *Switch) addOutboundPeerWithConfig(
 	stream, err := conn.OpenStream(HandshakeStreamID, nil)
 	if err != nil {
 		sw.Logger.Error("Failed to open handshake stream", "peer", addr, "err", err)
+		_ = conn.Close(err.Error())
 		return err
 	}
 
@@ -750,6 +751,8 @@ func (sw *Switch) addOutboundPeerWithConfig(
 			sw.addrBook.RemoveAddress(addr)
 			sw.addrBook.AddOurAddress(addr)
 		}
+
+		_ = conn.Close(err.Error())
 
 		return err
 	}
@@ -769,6 +772,8 @@ func (sw *Switch) addOutboundPeerWithConfig(
 	if err := sw.addPeer(p); err != nil {
 		if p.IsRunning() {
 			_ = p.Stop()
+		} else {
+			_ = conn.Close(err.Error())
 		}
 		return err
 	}
