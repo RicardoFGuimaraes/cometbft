@@ -616,6 +616,7 @@ func testCreatePeerWithConfig(dir string, id int, config *ReactorConfig) *p2p.Sw
 
 			r := NewReactor(book, config)
 			r.SetLogger(logger)
+			r.SetEnsurePeersPeriod(250 * time.Millisecond)
 
 			sw.SetLogger(logger)
 			sw.AddReactor("PEX", r)
