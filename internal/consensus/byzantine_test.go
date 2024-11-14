@@ -49,7 +49,7 @@ func TestByzantinePrevoteEquivocation(t *testing.T) {
 	css := make([]*State, nValidators)
 
 	for i := 0; i < nValidators; i++ {
-		logger := consensusLogger().With("test", "byzantine", "validator", i)
+		logger := consensusLogger().With("validator", i)
 		stateDB := dbm.NewMemDB() // each state needs its own db
 		stateStore := sm.NewStore(stateDB, sm.StoreOptions{
 			DiscardABCIResponses: false,

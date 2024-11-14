@@ -200,12 +200,6 @@ func (sw *Switch) addPeerWithConnection(conn abstract.Connection) error {
 		}
 	}
 
-	pc, err := testInboundPeerConn(conn)
-	if err != nil {
-		closeConn(err)
-		return err
-	}
-
 	stream, err := conn.OpenStream(HandshakeStreamID, nil)
 	if err != nil {
 		closeConn(err)
@@ -214,6 +208,13 @@ func (sw *Switch) addPeerWithConnection(conn abstract.Connection) error {
 	defer stream.Close()
 
 	ni, err := handshake(sw.nodeInfo, stream, time.Second)
+	if err != nil {
+		closeConn(err)
+		return err
+	}
+
+	addr, _ := ni.NetAddr()
+	pc, err := testInboundPeerConn(conn, addr)
 	if err != nil {
 		closeConn(err)
 		return err
@@ -289,8 +290,9 @@ func MakeSwitch(
 
 func testInboundPeerConn(
 	conn abstract.Connection,
+	socketAddr *na.NetAddr,
 ) (peerConn, error) {
-	return testPeerConn(conn, false, false, nil)
+	return testPeerConn(conn, false, false, socketAddr)
 }
 
 func testPeerConn(

@@ -221,23 +221,24 @@ func (rp *remotePeer) accept() {
 
 		conn := newMockConnection(netConn)
 
-		pc, err := testInboundPeerConn(conn)
-		if err != nil {
-			_ = conn.Close(err.Error())
-			golog.Fatalf("Failed to create a peer: %+v", err)
-		}
-
 		stream, err := conn.OpenStream(HandshakeStreamID, nil)
 		if err != nil {
-			_ = pc.Close(err.Error())
+			_ = conn.Close(err.Error())
 			golog.Fatalf("Failed to open the handshake stream: %+v", err)
 		}
 		defer stream.Close()
 
-		_, err = handshake(rp.nodeInfo(), stream, time.Second)
+		ni, err := handshake(rp.nodeInfo(), stream, time.Second)
 		if err != nil {
-			_ = pc.Close(err.Error())
+			_ = conn.Close(err.Error())
 			golog.Printf("Failed to perform handshake: %+v", err)
+		}
+
+		addr, _ := ni.NetAddr()
+		pc, err := testInboundPeerConn(conn, addr)
+		if err != nil {
+			_ = conn.Close(err.Error())
+			golog.Fatalf("Failed to create a peer: %+v", err)
 		}
 
 		conns = append(conns, pc)
