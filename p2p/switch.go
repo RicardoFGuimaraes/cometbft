@@ -148,8 +148,13 @@ func WithMetrics(metrics *Metrics) SwitchOption {
 // AddReactor adds the given reactor to the switch.
 // NOTE: Not goroutine safe.
 func (sw *Switch) AddReactor(name string, reactor Reactor) Reactor {
+	// Register the reactor's stream descriptors.
 	for _, streamDesc := range reactor.StreamDescriptors() {
-		sw.streamInfoByStreamID[streamDesc.StreamID()] = streamInfo{reactor: reactor, msgType: streamDesc.MessageType()}
+		streamID := streamDesc.StreamID()
+		if _, ok := sw.streamInfoByStreamID[streamID]; ok {
+			panic(fmt.Sprintf("stream %v already registered", streamID))
+		}
+		sw.streamInfoByStreamID[streamID] = streamInfo{reactor: reactor, msgType: streamDesc.MessageType()}
 	}
 
 	sw.reactors[name] = reactor
@@ -160,6 +165,7 @@ func (sw *Switch) AddReactor(name string, reactor Reactor) Reactor {
 // RemoveReactor removes the given Reactor from the Switch.
 // NOTE: Not goroutine safe.
 func (sw *Switch) RemoveReactor(name string, reactor Reactor) {
+	// Remove the reactor's stream descriptors.
 	for _, streamDesc := range reactor.StreamDescriptors() {
 		delete(sw.streamInfoByStreamID, streamDesc.StreamID())
 	}

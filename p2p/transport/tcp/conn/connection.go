@@ -173,9 +173,6 @@ func NewMConnection(conn net.Conn, config MConnConfig) *MConnection {
 
 func (c *MConnection) SetLogger(l log.Logger) {
 	c.BaseService.SetLogger(l)
-	for _, ch := range c.channelsIdx {
-		ch.SetLogger(l.With("streamID", ch.desc.ID))
-	}
 }
 
 // OnStart implements BaseService.

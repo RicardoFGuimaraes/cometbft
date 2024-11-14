@@ -647,7 +647,11 @@ func testCreateSeed(dir string, id int, knownAddrs, srcAddrs []*na.NetAddr) *p2p
 			}
 			sw.SetAddrBook(book)
 
-			r := NewReactor(book, &ReactorConfig{})
+			r := NewReactor(book, &ReactorConfig{
+				// Makes the tests fail ¯\_(ツ)_/¯
+				// SeedMode: true,
+			})
+			r.SetEnsurePeersPeriod(250 * time.Millisecond)
 			r.SetLogger(logger)
 
 			sw.SetLogger(logger)
